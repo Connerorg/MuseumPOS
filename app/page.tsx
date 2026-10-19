@@ -16,7 +16,7 @@ type Notice = { kind: "success" | "error" | "info"; text: string };
 type Report = { period: { from: string; to: string }; totals: { sales_count: number; gross_sales_cents: number; refunds_count: number; refunds_cents: number; net_after_refunds_cents: number }; sales: { id: string; receipt_number: string | null; status: string; total_cents: number; created_at: string }[]; refunds: { id: string; sale_id: string; amount_cents: number; status: string; created_at: string }[]; truncated: boolean };
 type RefundRecord = { id: string; sale_id: string; requested_by: string; approved_by: string | null; amount_cents: number; reason: string; status: string; created_at: string };
 type RefundData = { sales: { id: string; receipt_number: string | null; total_cents: number; status: string; created_at: string; cashier_id: string }[]; refunds: RefundRecord[]; canApprove: boolean };
-type OfflineEntry = { id: string; created_at: string; device_id: string; cash_session_id: string; client_transaction_id: string; idempotency_key: string; payment_method: "cash"; source: "offline"; items: { kind: "ticket" | "product"; id: string; quantity: number; expected_unit_price_cents: number }[]; display_items: { name: string; quantity: number; unit_price_cents: number }[]; status: "queued" | "synced" | "conflict"; receipt_number?: string; error?: string };
+type OfflineEntry = { id: string; created_at: string; employee_id: string; device_id: string; cash_session_id: string; client_transaction_id: string; idempotency_key: string; payment_method: "cash"; source: "offline"; items: { kind: "ticket" | "product"; id: string; quantity: number; expected_unit_price_cents: number }[]; display_items: { name: string; quantity: number; unit_price_cents: number }[]; status: "queued" | "synced" | "conflict"; receipt_number?: string; error?: string };
 const OFFLINE_DB_NAME = "museum-pos-offline";
 function openOfflineDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -224,7 +224,7 @@ export default function Home() {
   const catalogue = useMemo<CatalogItem[]>(() => [
     ...((boot?.ticketTypes ?? []).map((t) => ({
       id: t.id, kind: "ticket" as const, name: t.name, code: t.code, category: "Tickets" as const,
-      price: boot?.priceRules.find((rule) => rule.ticket_type_id === t.id)?.unit_price_cents ?? t.base_price_cents, detail: t.description || "Admission ticket",
+      price: boot?.priceRules?.find((rule) => rule.ticket_type_id === t.id)?.unit_price_cents ?? t.base_price_cents, detail: t.description || "Admission ticket",
     }))),
     ...((boot?.products ?? []).map((p) => ({
       id: p.id, kind: "product" as const, name: p.name, code: p.sku, category: "Merchandise" as const,
@@ -275,6 +275,10 @@ export default function Home() {
   }
 
   async function signOut() {
+    if (offlineEntries.some((entry) => entry.status !== "synced")) {
+      setNotice({ kind: "error", text: "Sync or resolve pending offline entries before signing out so their cashier attribution is preserved." });
+      return;
+    }
     try {
       const client = createSupabaseBrowserClient();
       await client.auth.signOut();
@@ -321,6 +325,7 @@ export default function Home() {
     const entry: OfflineEntry = {
       id: ids.idempotency_key,
       created_at: new Date().toISOString(),
+      employee_id: boot.employee.id,
       device_id: deviceId,
       cash_session_id: session.id,
       client_transaction_id: ids.client_transaction_id,
@@ -357,7 +362,7 @@ export default function Home() {
           const result = await api<{ sale: { receipt_number?: string; status?: string } }>("/api/offline/sync", {
             method: "POST",
             body: JSON.stringify({
-              device_id: entry.device_id, cash_session_id: entry.cash_session_id,
+              employee_id: entry.employee_id, device_id: entry.device_id, cash_session_id: entry.cash_session_id,
               client_transaction_id: entry.client_transaction_id, idempotency_key: entry.idempotency_key,
               payment_method: "cash", source: "offline", items: entry.items,
             }),
