@@ -42,7 +42,26 @@ export async function POST(request: Request) {
     }
   }
   try {
-    const result = await createServiceSupabase().rpc("sync_offline_cash_sale", {
+    const serviceClient = createServiceSupabase();
+    const { data: existingSale, error: existingError } = await serviceClient.from("sales")
+      .select("id,cashier_id").eq("idempotency_key", body.idempotency_key.trim()).maybeSingle();
+    if (existingError) return NextResponse.json({ error: "Could not verify offline retry state." }, { status: 503 });
+    if (!existingSale) {
+      const [employeeResult, sessionResult] = await Promise.all([
+        serviceClient.from("employee_profiles").select("role,active").eq("id", data.user.id).maybeSingle(),
+        serviceClient.from("cash_sessions").select("id,device_id,opened_by,status").eq("id", body.cash_session_id).maybeSingle(),
+      ]);
+      if (!employeeResult.data?.active) return NextResponse.json({ error: "Active employee profile required." }, { status: 403 });
+      if (!sessionResult.data || sessionResult.data.device_id !== body.device_id || sessionResult.data.status !== "open") {
+        return NextResponse.json({ error: "The original cash session is no longer open or does not match this device. Manager review is required." }, { status: 409 });
+      }
+      if (sessionResult.data.opened_by !== data.user.id && !["manager", "administrator"].includes(employeeResult.data.role)) {
+        return NextResponse.json({ error: "Only the original session owner or a manager can reconcile this till." }, { status: 403 });
+      }
+    } else if (existingSale.cashier_id !== data.user.id) {
+      return NextResponse.json({ error: "This offline idempotency key belongs to another employee." }, { status: 409 });
+    }
+    const result = await serviceClient.rpc("sync_offline_cash_sale", {
       p_cashier_id: data.user.id,
       p_request: { ...body, idempotency_key: body.idempotency_key.trim(), payment_method: "cash", source: "offline" },
     });
