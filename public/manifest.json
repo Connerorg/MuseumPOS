@@ -1,0 +1,10 @@
+{
+  "name": "Museum Ticketing & Sales",
+  "short_name": "Museum POS",
+  "description": "Museum point of sale",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f6f2",
+  "theme_color": "#10241f",
+  "icons": []
+}
