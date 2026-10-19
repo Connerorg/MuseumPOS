@@ -1,26 +1,43 @@
 # Museum Ticketing & Sales Management System
 
-A local-first point-of-sale foundation for museum admission, merchandise, cash management, and ticket issuance.
+Local-first point-of-sale foundation for museum admission, merchandise, cash management, ticket issuance and reconciliation.
 
-## Current status
+## Status
 
-This repository is under active development. It is not production-ready and has not been deployed. Tax treatment, receipt requirements, and card terminal integration remain intentionally unconfigured.
+Early development preview. Not production-ready, not deployed, and not connected to a live database or payment terminal. Tax and receipt treatment require management/accounting confirmation. Card terminal integration remains undecided.
 
 ## Stack
 
 - Next.js App Router, React, TypeScript
 - Supabase Auth and PostgreSQL
-- PWA/offline cash queue planned with IndexedDB
-- Vercel project `museumpos` (no deployment yet)
+- PWA/offline queue planned with IndexedDB
+- Vercel project `museumpos` (deployment not started)
 
-## Safety decisions
+## Security decisions
 
-- Each employee has an individual Supabase Auth identity plus a separate POS PIN unlock.
+- Individual Supabase Auth identity plus a separate POS PIN unlock.
 - Offline sales are cash-only. Card payments require independently confirmed terminal results.
-- Never expose Supabase service-role credentials to the browser.
-- Prices and financial records must be validated by trusted server-side operations.
-- Confirm tax and receipt rules with management/accounting before enabling production checkout.
+- Never expose Supabase service-role credentials to browser code.
+- Financial records must be created through trusted server-side operations.
+- Tax and receipt rules must be confirmed before real checkout.
 
-## Development
+## Local setup
 
-The first implementation milestone is a local development build and database tests. Do not run production migrations or deploy this project without explicit approval.
+1. Install Node.js 22 or 24 and npm.
+2. Copy `.env.example` to `.env.local` and fill in a dedicated **development** Supabase project URL and anon key. Do not use production credentials.
+3. Run `npm install`.
+4. Run `npm run dev`.
+5. Open `http://localhost:3000`.
+
+The UI uses a demo catalogue and browser-local IndexedDB queue. A queued item is **not** a real sale and does not issue a valid ticket. The Supabase migration is an initial draft; inspect and test locally before applying to any database.
+
+## Planned milestones
+
+1. Validate migrations and RLS locally.
+2. Implement Auth-backed employee profiles, secure PIN verification, lockouts and server-side authorization.
+3. Implement atomic checkout, ticket issuance, inventory movements and idempotent offline synchronization.
+4. Add cash sessions/cash-up, reporting and supervisor workflows.
+5. Confirm tax/receipt rules and choose a card terminal integration.
+6. Run security, concurrency, offline recovery and acceptance tests.
+
+Never run production migrations or deploy without explicit approval.
