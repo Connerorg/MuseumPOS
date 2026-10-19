@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import JsBarcode from "jsbarcode";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 type Employee = { id: string; employee_number: string; display_name: string; role: string; active: boolean };
@@ -88,6 +89,16 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "The request failed.");
   return body as T;
+}
+
+function TicketBarcode({ value }: { value: string }) {
+  const ref = useRef<SVGSVGElement | null>(null);
+  useEffect(() => {
+    if (!ref.current || !value) return;
+    try { JsBarcode(ref.current, value, { format: "CODE128", displayValue: false, margin: 0, height: 46, width: 1.5 }); }
+    catch { if (ref.current) ref.current.innerHTML = ""; }
+  }, [value]);
+  return <svg ref={ref} className="ticket-barcode" role="img" aria-label={`Barcode ${value}`} />;
 }
 
 export default function Home() {
@@ -678,7 +689,7 @@ export default function Home() {
           <div className="cart-summary"><div className="sum-row"><span>Subtotal</span><span>{money(total)}</span></div><div className="sum-row"><span>Tax</span><span>Unconfigured</span></div><div className="sum-row total"><span>Total before configured tax</span><span>{money(total)}</span></div>
             {!session ? <div className="notice notice-info">Open a cash session before completing sales.</div> : <div className="notice notice-info">Cash only. Card terminal processing is not configured.</div>}
             <button className="primary-btn" disabled={!pinUnlocked || !session || !cart.length || total <= 0 || authBusy} onClick={checkout}>{authBusy ? "Processing…" : (isOnline ? "Complete cash sale" : "Queue offline cash sale")}</button>
-            {lastSale && <div className="sale-receipt print-receipt"><strong>Sale completed</strong><div>Receipt: {lastSale.receipt_number}</div><div>Total: {money(lastSale.total_cents)}</div>{lastSale.items?.map((item) => <div key={item.id} className="receipt-line">{item.item_name_snapshot} × {item.quantity}<span>{money(item.line_total_cents)}</span></div>)}{lastSale.tickets?.length ? <div className="issued-ticket-list"><strong>Issued admission tickets</strong>{lastSale.tickets.map((ticket) => <div className="issued-ticket" key={ticket.id}><span>Ticket code: <b>{ticket.ticket_code}</b></span><span className="barcode-text">{ticket.barcode}</span><small>Status: {ticket.status}</small></div>)}</div> : null}<small>Sale ID: {lastSale.sale_id}</small><button className="secondary-btn no-print" onClick={() => window.print()}>Print receipt / tickets</button></div>}
+            {lastSale && <div className="sale-receipt print-receipt"><strong>Sale completed</strong><div>Receipt: {lastSale.receipt_number}</div><div>Total: {money(lastSale.total_cents)}</div>{lastSale.items?.map((item) => <div key={item.id} className="receipt-line">{item.item_name_snapshot} × {item.quantity}<span>{money(item.line_total_cents)}</span></div>)}{lastSale.tickets?.length ? <div className="issued-ticket-list"><strong>Issued admission tickets</strong>{lastSale.tickets.map((ticket) => <div className="issued-ticket" key={ticket.id}><span>Ticket code: <b>{ticket.ticket_code}</b></span><TicketBarcode value={ticket.barcode} /><span className="barcode-text">{ticket.barcode}</span><small>Status: {ticket.status}</small></div>)}</div> : null}<small>Sale ID: {lastSale.sale_id}</small><button className="secondary-btn no-print" onClick={() => window.print()}>Print receipt / tickets</button></div>}
             <div className="helper">Tax treatment remains unconfigured pending management/accounting confirmation. Do not use for real sales until this is confirmed.</div>
           </div>
         </section>
