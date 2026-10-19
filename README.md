@@ -17,9 +17,10 @@ The interface and server workflows are being implemented, but this is **not yet 
 
 - Individual Supabase Auth sign-in and employee profile lookup.
 - PostgreSQL pgcrypto PIN hashing, failed-attempt lockout, and 15-minute server-side PIN unlock.
-- Authenticated bootstrap API that loads active ticket types, products, POS devices, categories and open cash sessions.
+- Authenticated bootstrap API that loads active ticket types, products, effective individual price rules, POS devices, categories and open cash sessions.
+- Manager/administrator interface and APIs for catalogue creation, individual price changes, POS device registration, and employee PIN administration.
 - Transactional online cash checkout: server-side price resolution, sale/payment/cash-ledger/audit writes, unique ticket issuance, tracked stock reduction and idempotency key.
-- Single-use barcode/ticket-code redemption with row locking.
+- Single-use barcode/ticket-code redemption with row locking, Code 128 ticket barcode rendering, receipt/ticket details and print layout.
 - Cash session open/close with expected-vs-counted cash variance and server-side session ownership rules.
 - Manager/administrator-controlled inventory adjustments with reason, stock validation and audit record.
 - Date-filtered financial report API restricted to supervisory roles.
