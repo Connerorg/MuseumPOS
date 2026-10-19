@@ -37,6 +37,9 @@ export async function GET() {
     if (employeeError) return NextResponse.json({ error: "Employee profile lookup failed." }, { status: 503 });
     if (!employee || !employee.active) return NextResponse.json({ error: "This account is not provisioned as an active museum employee." }, { status: 403 });
 
+    const { data: pinUnlocked, error: pinError } = await db.rpc("require_employee_pin_unlock", { p_employee_id: auth.user.id });
+    if (pinError) return NextResponse.json({ error: "PIN unlock migration is not applied. Apply the Supabase migrations before using the POS." }, { status: 503 });
+
     const [tickets, products, devices, sessions, categories] = await Promise.all([
       db.from("ticket_types").select("id,code,name,description,base_price_cents,currency,active").eq("active", true).order("name"),
       db.from("products").select("id,sku,barcode,name,description,category_id,unit_price_cents,currency,track_inventory,stock_on_hand,reorder_level,active").eq("active", true).order("name"),
@@ -54,7 +57,7 @@ export async function GET() {
       devices: devices.data ?? [],
       openSessions: sessions.data ?? [],
       categories: categories.data ?? [],
-      pinUnlocked: false,
+      pinUnlocked: pinUnlocked === true,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return NextResponse.json({ error: "POS service unavailable." }, { status: 503 });
