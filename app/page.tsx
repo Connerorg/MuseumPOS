@@ -14,6 +14,8 @@ type Bootstrap = { employee: Employee; ticketTypes: TicketType[]; products: Prod
 type CartLine = { item: CatalogItem; quantity: number };
 type Notice = { kind: "success" | "error" | "info"; text: string };
 type Report = { period: { from: string; to: string }; totals: { sales_count: number; gross_sales_cents: number; refunds_count: number; refunds_cents: number; net_after_refunds_cents: number }; sales: { id: string; receipt_number: string | null; status: string; total_cents: number; created_at: string }[]; refunds: { id: string; sale_id: string; amount_cents: number; status: string; created_at: string }[]; truncated: boolean };
+type RefundRecord = { id: string; sale_id: string; requested_by: string; approved_by: string | null; amount_cents: number; reason: string; status: string; created_at: string };
+type RefundData = { sales: { id: string; receipt_number: string | null; total_cents: number; status: string; created_at: string; cashier_id: string }[]; refunds: RefundRecord[]; canApprove: boolean };
 const localDate = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
 
 const money = (cents: number) => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }).format(cents / 100);
@@ -57,6 +59,12 @@ export default function Home() {
   const [reportTo, setReportTo] = useState(localDate());
   const [report, setReport] = useState<Report | null>(null);
   const [reportBusy, setReportBusy] = useState(false);
+  const [refundData, setRefundData] = useState<RefundData | null>(null);
+  const [refundSaleId, setRefundSaleId] = useState("");
+  const [refundReason, setRefundReason] = useState("");
+  const [refundDecisionReason, setRefundDecisionReason] = useState("");
+  const [restockRefundedItems, setRestockRefundedItems] = useState(true);
+  const [refundBusy, setRefundBusy] = useState(false);
 
   const loadBootstrap = useCallback(async () => {
     setLoading(true);
@@ -95,6 +103,20 @@ export default function Home() {
     void start();
     return () => { cancelled = true; };
   }, [loadBootstrap]);
+
+  const loadRefunds = useCallback(async () => {
+    try {
+      const data = await api<RefundData>("/api/refunds");
+      setRefundData(data);
+    } catch (error) {
+      setRefundData(null);
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not load refund records." });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (boot && active === "Refunds") void loadRefunds();
+  }, [active, boot, loadRefunds]);
 
   useEffect(() => {
     if (!boot || !deviceId) { setSession(null); return; }
@@ -232,6 +254,49 @@ export default function Home() {
     } finally { setAuthBusy(false); }
   }
 
+  async function requestRefund(event: FormEvent) {
+    event.preventDefault();
+    const sale = refundData?.sales.find((s) => s.id === refundSaleId);
+    if (!sale) return;
+    setRefundBusy(true);
+    try {
+      await api("/api/refunds", { method: "POST", body: JSON.stringify({ sale_id: sale.id, amount_cents: sale.total_cents, reason: refundReason }) });
+      setRefundReason("");
+      setNotice({ kind: "success", text: "Full-sale cash refund request saved. A manager must approve it before cash is returned." });
+      await loadRefunds();
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Refund request failed." });
+    } finally { setRefundBusy(false); }
+  }
+
+  async function decideRefund(refundId: string, approve: boolean) {
+    setRefundBusy(true);
+    try {
+      await api("/api/refunds/decision", { method: "PATCH", body: JSON.stringify({ refund_id: refundId, approve, decision_reason: refundDecisionReason }) });
+      setRefundDecisionReason("");
+      setNotice({ kind: "success", text: approve ? "Refund approved. A manager can now complete the cash return in an open till session." : "Refund request rejected and audited." });
+      await loadRefunds();
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Refund decision failed." });
+    } finally { setRefundBusy(false); }
+  }
+
+  async function completeRefund(refundId: string) {
+    if (!session) {
+      setNotice({ kind: "error", text: "Open a cash session before completing a cash refund." });
+      return;
+    }
+    if (!window.confirm("Confirm the full cash refund has been physically paid to the customer? This records the till cash outflow and voids valid tickets.")) return;
+    setRefundBusy(true);
+    try {
+      await api("/api/refunds/complete", { method: "POST", body: JSON.stringify({ refund_id: refundId, cash_session_id: session.id, restock_returned_items: restockRefundedItems }) });
+      setNotice({ kind: "success", text: "Cash refund completed and recorded. Returned stock handling and ticket invalidation were recorded." });
+      await Promise.all([loadRefunds(), loadBootstrap()]);
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Refund could not be completed." });
+    } finally { setRefundBusy(false); }
+  }
+
   async function loadReport(event: FormEvent) {
     event.preventDefault();
     setReportBusy(true);
@@ -282,11 +347,11 @@ export default function Home() {
   }
 
   const nav = [
-    { name: "Checkout", icon: "▦" }, { name: "Tickets", icon: "▤" },
+    { name: "Checkout", icon: "▦" }, { name: "Tickets", icon: "▤" }, { name: "Refunds", icon: "↩" },
     { name: "Inventory", icon: "▣" }, { name: "Cash-up", icon: "◷" }, { name: "Reports", icon: "▥" },
   ];
   const headings: Record<string, string> = {
-    Checkout: "Point of sale", Tickets: "Ticket admission", Inventory: "Inventory",
+    Checkout: "Point of sale", Tickets: "Ticket admission", Refunds: "Refund requests", Inventory: "Inventory",
     "Cash-up": "Cash-up & reconciliation", Reports: "Sales reports",
   };
 
@@ -344,6 +409,7 @@ export default function Home() {
         </section>
       </div>}
       {active === "Tickets" && <section className="panel section-panel"><div className="panel-head"><div><h2>Validate admission ticket</h2><p className="subtle">Scan a barcode with a USB scanner or enter the ticket code.</p></div></div><form className="inline-form" onSubmit={redeemTicket}><input aria-label="Ticket barcode" placeholder="Scan barcode or ticket code" autoComplete="off" required minLength={8} maxLength={128} value={barcode} onChange={(e) => setBarcode(e.target.value)} /><button className="primary-btn" disabled={!pinUnlocked || authBusy}>{authBusy ? "Validating…" : "Validate and redeem"}</button></form>{lastTicket && <div className="sale-receipt"><strong>Admission accepted</strong><div>Ticket: {lastTicket.ticket_code}</div><div>Status: {lastTicket.status}</div><div>Redeemed: {new Date(lastTicket.redeemed_at).toLocaleString("en-ZA")}</div></div>}<div className="helper">Redemption is one-time only. An already redeemed or invalid ticket is rejected by the database.</div></section>}
+      {active === "Refunds" && <section className="panel section-panel"><div className="panel-head"><div><h2>Full-sale cash refunds</h2><p className="subtle">Refund requests require independent manager approval. Card refunds are disabled until a payment-provider workflow exists.</p></div><button className="secondary-btn" onClick={() => void loadRefunds()}>Refresh</button></div><div className="notice notice-info">Current workflow supports full-sale cash refunds only. Completion requires an open cash session and a manager/administrator. Confirm the customer has physically received the cash before completing.</div><form className="session-form refund-request-form" onSubmit={requestRefund}><label>Sale to refund<select required value={refundSaleId} onChange={(e) => setRefundSaleId(e.target.value)}><option value="">Select a completed sale</option>{(refundData?.sales ?? []).map((s) => <option key={s.id} value={s.id}>{s.receipt_number ?? s.id.slice(0,8)} · {money(s.total_cents)} · {new Date(s.created_at).toLocaleString("en-ZA")}</option>)}</select></label>{refundSaleId && <div className="subtle">Refund amount: {money(refundData?.sales.find((s) => s.id === refundSaleId)?.total_cents ?? 0)} (full sale only)</div>}<label>Reason for refund<input required minLength={3} maxLength={500} value={refundReason} onChange={(e) => setRefundReason(e.target.value)} placeholder="Reason supplied by customer" /></label><button className="primary-btn" disabled={!pinUnlocked || refundBusy || !refundSaleId}>Request refund approval</button></form><div className="inventory-adjust"><h3>Refund approval queue</h3><p className="subtle">The requesting employee cannot approve their own request.</p><label className="field-label">Decision reason<input value={refundDecisionReason} onChange={(e) => setRefundDecisionReason(e.target.value)} minLength={3} maxLength={500} placeholder="Reason for approving or rejecting" /></label><label className="restock-option"><input type="checkbox" checked={restockRefundedItems} onChange={(e) => setRestockRefundedItems(e.target.checked)} /> Restock returned merchandise items (confirm items are fit to return to stock)</label><div className="table-wrap"><table className="data-table"><thead><tr><th>Refund</th><th>Sale</th><th>Amount</th><th>Reason</th><th>Status</th><th>Action</th></tr></thead><tbody>{(refundData?.refunds ?? []).map((r) => <tr key={r.id}><td>{r.id.slice(0,8).toUpperCase()}</td><td>{r.sale_id.slice(0,8).toUpperCase()}</td><td>{money(r.amount_cents)}</td><td>{r.reason}</td><td>{r.status}</td><td>{r.status === "pending" && refundData?.canApprove ? <div className="row-actions"><button className="secondary-btn" disabled={refundBusy || refundDecisionReason.trim().length < 3} onClick={() => void decideRefund(r.id, false)}>Reject</button><button className="primary-btn" disabled={refundBusy || refundDecisionReason.trim().length < 3} onClick={() => void decideRefund(r.id, true)}>Approve</button></div> : r.status === "approved" && refundData?.canApprove ? <button className="primary-btn" disabled={refundBusy || !session} onClick={() => void completeRefund(r.id)}>Complete cash refund</button> : "—"}</td></tr>)}</tbody></table>{(refundData?.refunds.length ?? 0) === 0 && <div className="empty-state">No refund requests found.</div>}</div></div><div className="helper">Refund approval and completion are audited. Completing a refund updates the sale status, cash ledger and valid ticket statuses. Restock only items physically returned in resalable condition.</div></section>}
       {active === "Inventory" && <section className="panel section-panel"><div className="panel-head"><div><h2>Stock on hand</h2><p className="subtle">Current active product stock from Supabase.</p></div></div><div className="table-wrap"><table className="data-table"><thead><tr><th>SKU</th><th>Product</th><th>Price</th><th>Stock</th><th>Reorder level</th><th>Status</th></tr></thead><tbody>{(boot.products ?? []).map((p) => <tr key={p.id}><td>{p.sku}</td><td>{p.name}</td><td>{money(p.unit_price_cents)}</td><td>{p.track_inventory ? p.stock_on_hand : "Not tracked"}</td><td>{p.track_inventory ? p.reorder_level : "—"}</td><td><span className={p.track_inventory && p.stock_on_hand <= p.reorder_level ? "status pending" : "status"}>{p.track_inventory && p.stock_on_hand <= p.reorder_level ? "Reorder" : "OK"}</span></td></tr>)}</tbody></table></div><div className="inventory-adjust"><h3>Record stock movement</h3><p className="subtle">Requires a supervisor, manager or administrator role and an unlocked PIN.</p><form className="session-form" onSubmit={adjustInventory}><label>Product<select required value={inventoryProductId} onChange={(e) => setInventoryProductId(e.target.value)}><option value="">Select tracked product</option>{boot.products.filter((p) => p.track_inventory).map((p) => <option key={p.id} value={p.id}>{p.name} · {p.sku}</option>)}</select></label><label>Movement type<select value={inventoryMovement} onChange={(e) => setInventoryMovement(e.target.value)}><option value="restock">Restock</option><option value="adjustment">Stock correction</option><option value="return">Return to stock</option><option value="waste">Waste / damage</option><option value="opening_balance">Opening balance</option></select></label><label>Quantity change (+ in, − out)<input type="number" step="1" required value={inventoryDelta} onChange={(e) => setInventoryDelta(e.target.value)} /></label><label>Reason<input required minLength={3} maxLength={500} value={inventoryReason} onChange={(e) => setInventoryReason(e.target.value)} placeholder="e.g. supplier delivery reference" /></label><button className="primary-btn" disabled={!pinUnlocked || !inventoryProductId || authBusy}>Save stock movement</button></form></div><div className="helper">Completed sales reduce tracked stock in the same database transaction. All manual movements are recorded with a reason and audit entry.</div></section>}
       {active === "Cash-up" && <section className="panel section-panel"><div className="panel-head"><div><h2>Cash session</h2><p className="subtle">Open a till session or close and reconcile the physical cash count.</p></div></div><label className="field-label">POS device<select value={deviceId} onChange={(e) => setDeviceId(e.target.value)}><option value="">Select device</option>{boot.devices.map((d) => <option key={d.id} value={d.id}>{d.display_name} ({d.device_code})</option>)}</select></label>{boot.devices.length === 0 && <div className="notice notice-error">No active POS devices are registered in Supabase. An administrator must register a device before sales.</div>}{anotherOpenSession && <div className="notice notice-error">This device has an open cash session owned by another employee. Select another device or ask the session owner/manager to close it.</div>}{session ? <form className="session-form" onSubmit={closeSession}><div className="stat-cards"><div className="stat-card"><span>Opening float</span><strong>{money(session.opening_float_cents)}</strong></div><div className="stat-card"><span>Opened</span><strong>{new Date(session.opened_at).toLocaleTimeString("en-ZA")}</strong></div></div><label>Counted cash at close (ZAR)<input type="number" min="0" step="0.01" required value={countedCash} onChange={(e) => setCountedCash(e.target.value)} placeholder="0.00" /></label><button className="primary-btn" disabled={!pinUnlocked || authBusy}>{authBusy ? "Closing…" : "Close and reconcile session"}</button></form> : <form className="session-form" onSubmit={openSession}><label>Opening float (ZAR)<input type="number" min="0" step="0.01" required value={openingFloat} onChange={(e) => setOpeningFloat(e.target.value)} /></label><button className="primary-btn" disabled={!pinUnlocked || authBusy || !deviceId || Boolean(anotherOpenSession)}>{authBusy ? "Opening…" : "Open cash session"}</button></form>}</section>}
       {active === "Reports" && <section className="panel section-panel"><div className="panel-head"><div><h2>Sales and refunds report</h2><p className="subtle">Restricted to supervisors, managers and administrators.</p></div></div><form className="report-filters" onSubmit={loadReport}><label>From<input type="date" required value={reportFrom} onChange={(e) => setReportFrom(e.target.value)} /></label><label>To<input type="date" required min={reportFrom} value={reportTo} onChange={(e) => setReportTo(e.target.value)} /></label><button className="primary-btn" disabled={reportBusy}>{reportBusy ? "Loading…" : "Load report"}</button></form>{report && <><div className="stat-cards"><div className="stat-card"><span>Completed sales</span><strong>{report.totals.sales_count}</strong></div><div className="stat-card"><span>Gross sales</span><strong>{money(report.totals.gross_sales_cents)}</strong></div><div className="stat-card"><span>Completed refunds</span><strong>{money(report.totals.refunds_cents)}</strong></div><div className="stat-card"><span>Net after refunds</span><strong>{money(report.totals.net_after_refunds_cents)}</strong></div></div>{report.truncated && <div className="notice notice-info">This report is limited to the latest 1,000 sales or refunds in the selected period. Narrow the date range for a complete result.</div>}<h3 className="report-heading">Sales</h3><div className="table-wrap"><table className="data-table"><thead><tr><th>Receipt</th><th>Date</th><th>Status</th><th>Total</th></tr></thead><tbody>{report.sales.map((s) => <tr key={s.id}><td>{s.receipt_number ?? s.id.slice(0, 8)}</td><td>{new Date(s.created_at).toLocaleString("en-ZA")}</td><td>{s.status}</td><td>{money(s.total_cents)}</td></tr>)}</tbody></table>{report.sales.length === 0 && <div className="empty-state">No sales in this date range.</div>}</div><h3 className="report-heading">Refunds</h3><div className="table-wrap"><table className="data-table"><thead><tr><th>Reference</th><th>Date</th><th>Status</th><th>Amount</th></tr></thead><tbody>{report.refunds.map((r) => <tr key={r.id}><td>{r.id.slice(0, 8).toUpperCase()}</td><td>{new Date(r.created_at).toLocaleString("en-ZA")}</td><td>{r.status}</td><td>{money(r.amount_cents)}</td></tr>)}</tbody></table>{report.refunds.length === 0 && <div className="empty-state">No refunds in this date range.</div>}</div></>}</section>}
