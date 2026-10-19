@@ -47,7 +47,7 @@ export async function GET() {
       db.from("pos_devices").select("id,device_code,display_name,active").eq("active", true).order("display_name"),
       db.from("cash_sessions").select("id,device_id,opened_by,status,opening_float_cents,opened_at").eq("status", "open").order("opened_at", { ascending: false }),
       db.from("sale_categories").select("id,code,name,active").eq("active", true).order("sort_order"),
-      db.from("price_rules").select("id,ticket_type_id,product_id,unit_price_cents,valid_from").eq("category_code", "individual").lte("valid_from", now).or("valid_until.is.null,valid_until.gt." + now).order("valid_from", { ascending: false }),
+      db.from("price_rules").select("id,ticket_type_id,product_id,unit_price_cents,valid_from,valid_until").eq("category_code", "individual").lte("valid_from", now).order("valid_from", { ascending: false }),
     ]);
     const failed = [tickets, products, devices, sessions, categories, priceRules].find((result) => result.error);
     if (failed?.error) return NextResponse.json({ error: "Could not load the POS catalogue. Confirm that database migrations have been applied." }, { status: 503 });
@@ -59,7 +59,7 @@ export async function GET() {
       devices: devices.data ?? [],
       openSessions: sessions.data ?? [],
       categories: categories.data ?? [],
-      priceRules: priceRules.data ?? [],
+      priceRules: (priceRules.data ?? []).filter((rule) => !rule.valid_until || rule.valid_until > now).map(({ id, ticket_type_id, product_id, unit_price_cents, valid_from }) => ({ id, ticket_type_id, product_id, unit_price_cents, valid_from })),
       pinUnlocked: pinUnlocked === true,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch {
