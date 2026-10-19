@@ -31,14 +31,13 @@ export async function POST(request: Request) {
       .select("id,role,active").eq("id", data.user.id).maybeSingle();
     if (profileError) return NextResponse.json({ error: "Employee profile lookup failed." }, { status: 503 });
     if (!employee?.active || !["manager", "administrator"].includes(employee.role)) return NextResponse.json({ error: "Manager or administrator role required." }, { status: 403 });
-    const { data: device, error: insertError } = await db.from("pos_devices")
-      .insert({ device_code: body.device_code.trim(), display_name: body.display_name.trim(), active: true })
-      .select("id,device_code,display_name,active").single();
+    const { data: device, error: insertError } = await db.rpc("register_pos_device", {
+      p_actor_id: data.user.id, p_device_code: body.device_code.trim(), p_display_name: body.display_name.trim(),
+    });
     if (insertError) {
       if (insertError.code === "23505") return NextResponse.json({ error: "That device code is already registered." }, { status: 409 });
-      return NextResponse.json({ error: "Device could not be registered." }, { status: 409 });
+      return NextResponse.json({ error: "Device could not be registered. Confirm the device registration migration is applied." }, { status: 409 });
     }
-    await db.from("audit_logs").insert({ actor_id: data.user.id, action: "pos_device.created", entity_type: "pos_device", entity_id: device.id, details: { device_code: device.device_code, display_name: device.display_name } });
     return NextResponse.json({ device }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return NextResponse.json({ error: "Device management service unavailable." }, { status: 503 });
