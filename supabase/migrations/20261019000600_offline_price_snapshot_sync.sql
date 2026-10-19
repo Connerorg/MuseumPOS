@@ -15,6 +15,7 @@ declare
   v_product public.products%rowtype;
   v_ticket public.ticket_types%rowtype;
   v_rule integer;
+  v_existing public.sales%rowtype;
 begin
   if p_request is null or jsonb_typeof(p_request) <> 'object'
      or coalesce(p_request->>'source','') <> 'offline'
@@ -22,6 +23,13 @@ begin
      or jsonb_array_length(p_request->'items') < 1
      or jsonb_array_length(p_request->'items') > 100 then
     raise exception using errcode='22023', message='invalid_offline_sync_request';
+  end if;
+
+  -- A retry of a request whose response was lost must replay the original sale,
+  -- even if catalogue prices changed after the original commit.
+  select * into v_existing from public.sales where idempotency_key = p_request->>'idempotency_key';
+  if found then
+    return public.complete_cash_sale(p_cashier_id, p_request - 'source');
   end if;
 
   for v_item in select value from jsonb_array_elements(p_request->'items')
