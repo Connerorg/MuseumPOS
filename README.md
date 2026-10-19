@@ -1,61 +1,76 @@
 # Museum Ticketing & Sales Management System
 
-Museum point-of-sale application for admission tickets, merchandise sales, barcode admission, employee controls, inventory, cash sessions, reconciliation and reporting.
+Museum point-of-sale application for admissions, merchandise, ticket barcodes, employee controls, inventory, cash sessions, reconciliation, refunds and reporting.
 
-## Current implementation status
+## Important status
 
-The application is still under development and must not be used to take real customer payments yet. The home screen remains a demo interface and is not yet wired to the new server APIs. Supabase migrations and the full workflow have not been executed and verified end-to-end. A push to `main` can trigger the connected Vercel production build, but a successful build alone does not mean the POS is operational or production-safe.
+The interface and server workflows are being implemented, but this is **not yet approved for real customer transactions**. The Supabase connector available to the developer currently lists the organization but no accessible projects, so migrations have not been applied or tested against the museum's actual database. GitHub CI checks the Next.js code only; it does not execute PostgreSQL migrations or prove end-to-end operation.
 
 ## Stack
 
 - Next.js App Router, React, TypeScript
 - Supabase Auth and PostgreSQL
 - Vercel deployment from GitHub `main`
-- IndexedDB demo queue in the current UI; reliable offline synchronization is not yet implemented
+- IndexedDB local queue and PWA shell caching for offline cash entry
 
-## Implemented server-side foundation
+## Current implementation
 
-- Authenticated server routes for cash checkout, employee PIN verification and manager PIN setup, cash-session open/close, and ticket redemption.
-- Database transaction for online cash checkout: validates active employee/device/session, resolves prices from database catalogue, creates sale and payment records, issues unique tickets, records inventory movements, updates tracked stock, records cash movements and writes an audit entry.
-- Idempotency key support for checkout retries.
-- PIN hashes stored using PostgreSQL pgcrypto, with failed-attempt lockout and a short-lived server-side PIN unlock.
-- Ticket redemption locks the ticket row and allows a valid ticket to be redeemed only once.
-- Card checkout is intentionally rejected. A terminal integration and independent payment confirmation are required before card checkout can be enabled.
-- Tax treatment is marked unconfigured; tax and receipt rules must be confirmed by management/accounting before real sales.
+- Individual Supabase Auth sign-in and employee profile lookup.
+- PostgreSQL pgcrypto PIN hashing, failed-attempt lockout, and 15-minute server-side PIN unlock.
+- Authenticated bootstrap API that loads active ticket types, products, POS devices, categories and open cash sessions.
+- Transactional online cash checkout: server-side price resolution, sale/payment/cash-ledger/audit writes, unique ticket issuance, tracked stock reduction and idempotency key.
+- Single-use barcode/ticket-code redemption with row locking.
+- Cash session open/close with expected-vs-counted cash variance and server-side session ownership rules.
+- Manager/administrator-controlled inventory adjustments with reason, stock validation and audit record.
+- Date-filtered financial report API restricted to supervisory roles.
+- Full-sale cash refund request, independent manager approval/rejection, and cash refund completion. Completion requires an open cash session, verifies available till cash, updates the sale and ticket status, records cash movement and audit details, and can restock returned tracked items when explicitly confirmed.
+- PWA manifest/service worker, IndexedDB offline cash queue, idempotent sync endpoint and cached price-snapshot validation. Conflicts remain queued for manager review.
+- Card checkout/refunds are not integrated. The UI explicitly limits checkout to cash.
 
-These features depend on applying the Supabase migrations and configuring server environment variables. They have not yet been verified against a running database.
+These workflows depend on applying migrations in timestamp order and configuring Supabase environment variables. They have not been tested against a live or local Postgres instance in this environment.
 
-## Local setup
+## Environment setup
 
-1. Use Node.js 22 or 24 and npm.
+1. Use Node.js 22 or 24.
 2. Copy `.env.example` to `.env.local`.
-3. Configure a dedicated development Supabase project URL and anon key. Set the service-role key only in server-side environment variables; never expose it to browser code.
-4. Apply the migrations to a disposable local/development Supabase database in timestamp order.
-5. Provision employee Auth users and matching `employee_profiles` rows. A manager/administrator must set employee PINs through the server endpoint.
-6. Register an active POS device in `pos_devices` before opening a cash session.
-7. Run `npm install`, `npm run lint`, `npx tsc --noEmit`, and `npm run build`.
-8. Open `http://localhost:3000`.
+3. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` to the development Supabase project values.
+4. Set `SUPABASE_SERVICE_ROLE_KEY` as a server-only secret in local environment and Vercel project settings. Never expose it via `NEXT_PUBLIC_*` or browser code.
+5. Apply every SQL file under `supabase/migrations` to a **development/test** Supabase database in timestamp order. Do not apply to production until reviewed and tested.
+6. Provision Supabase Auth users with matching active `employee_profiles` rows; ensure at least one manager/administrator can set employee PINs.
+7. Register an active POS device in `pos_devices`. Seed/verify authoritative prices and tracked products before testing checkout.
+8. Run:
+   ```sh
+   npm install
+   npm run lint
+   npx tsc --noEmit
+   npm run build
+   ```
+9. Test all workflows using non-production data before enabling sales.
 
-## API routes added
+## API routes
 
-All routes require a valid Supabase Auth session. Operational routes also require a recent successful PIN unlock. They require the migrations and server environment variables to be present.
+- `GET /api/pos/bootstrap` — authenticated employee profile, active catalogue, devices and open sessions.
+- `POST /api/employee/pin` — verify PIN and unlock for 15 minutes.
+- `POST /api/employee/pin/set` — manager/administrator sets or resets an employee PIN.
+- `POST /api/cash-sessions` — open or close a cash session.
+- `POST /api/checkout/cash` — online cash checkout.
+- `POST /api/offline/sync` — idempotent offline cash reconciliation with cached-price validation.
+- `POST /api/tickets/redeem` — one-time ticket redemption.
+- `POST /api/inventory/adjust` — supervisor/manager/admin stock movement.
+- `GET /api/reports/summary?from=YYYY-MM-DD&to=YYYY-MM-DD` — supervisory financial summary.
+- `GET /api/refunds`, `POST /api/refunds` — list eligible sales/refunds and request a full-sale cash refund.
+- `PATCH /api/refunds/decision` — manager/administrator approval or rejection.
+- `POST /api/refunds/complete` — complete an approved cash refund against an open till session.
 
-- `POST /api/employee/pin` — verify the signed-in employee PIN and unlock for 15 minutes.
-- `POST /api/employee/pin/set` — manager/administrator sets or resets an active employee PIN.
-- `POST /api/cash-sessions` — `action: "open"` with device ID and opening float cents, or `action: "close"` with session ID and counted cash cents.
-- `POST /api/checkout/cash` — online cash checkout only.
-- `POST /api/tickets/redeem` — redeem a ticket barcode or ticket code once.
+Operational routes require a valid Supabase Auth session and a recent PIN unlock. The database RPCs are restricted to the service role and rely on the server routes to verify the user session.
 
-These APIs are not yet connected to the demo UI. The API surface does not replace acceptance, concurrency, authorization, migration, and recovery testing.
+## Outstanding production blockers
 
-## Remaining work before production
+- Connect the correct Supabase project, apply migrations to a disposable development database, run SQL/security advisors and test all database functions.
+- Add migration-level automated tests and end-to-end tests for concurrent checkout, duplicate retries, PIN lockouts, refunds, inventory races, offline conflicts and session reconciliation.
+- Confirm tax treatment and legal receipt requirements with management/accounting.
+- Select and integrate the card terminal only when payment confirmation can be independently verified.
+- Complete audit review, reporting verification, operational recovery procedures, and device-level PWA/offline acceptance tests.
+- Verify the current Vercel production deployment and environment variables from the Vercel dashboard.
 
-- Wire the UI to real employee sign-in/PIN unlock, catalogue, checkout, receipt and admission scanning.
-- Complete and test inventory management, refund approvals, cash-up/reconciliation, reporting and audit review workflows.
-- Implement idempotent offline cash synchronization and conflict handling; the current IndexedDB queue is a demo and does not sync.
-- Choose and integrate the card terminal only after independent terminal confirmation can be enforced.
-- Confirm tax and receipt requirements with management/accounting.
-- Run database migrations and tests against a clean development database; run lint, TypeScript and production build; test concurrency, security, and error recovery.
-- Configure the actual Vercel environment variables and verify the resulting deployment logs and runtime behavior.
-
-Do not treat a green Vercel build as proof of a functioning POS. Do not apply unverified migrations to a live database or accept real payments until the end-to-end checks pass.
+A green build is not proof of a functioning POS. Do not accept real payments until database migrations, security review, tax/receipt rules and end-to-end tests are complete.
