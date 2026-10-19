@@ -51,6 +51,29 @@ async function saveOfflineEntry(entry: OfflineEntry): Promise<void> {
     });
   } finally { db.close(); }
 }
+
+async function saveCachedBootstrap(value: Bootstrap): Promise<void> {
+  const db = await openOfflineDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction("cache", "readwrite");
+      tx.objectStore("cache").put({ key: "bootstrap", value, saved_at: new Date().toISOString() });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } finally { db.close(); }
+}
+async function readCachedBootstrap(): Promise<Bootstrap | null> {
+  const db = await openOfflineDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const req = db.transaction("cache", "readonly").objectStore("cache").get("bootstrap");
+      req.onsuccess = () => resolve((req.result?.value as Bootstrap | undefined) ?? null);
+      req.onerror = () => reject(req.error);
+    });
+  } finally { db.close(); }
+}
 const localDate = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
 
 const money = (cents: number) => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }).format(cents / 100);
@@ -111,8 +134,27 @@ export default function Home() {
       const data = await api<Bootstrap>("/api/pos/bootstrap");
       setBoot(data);
       setDeviceId((old) => old || data.devices[0]?.id || "");
+      await saveCachedBootstrap(data).catch(() => undefined);
+      if (data.pinUnlocked) {
+        try { sessionStorage.setItem("museum-pos-pin-unlocked-at", String(Date.now())); } catch {}
+      }
       setNotice({ kind: "success", text: "Connected to Supabase. Prices and stock below come from the current catalogue." });
     } catch (error) {
+      try {
+        const cached = await readCachedBootstrap();
+        if (cached) {
+          let recentUnlock = false;
+          try {
+            const unlockedAt = Number(sessionStorage.getItem("museum-pos-pin-unlocked-at") || "0");
+            recentUnlock = unlockedAt > 0 && Date.now() - unlockedAt < 15 * 60 * 1000;
+          } catch {}
+          const offlineBoot = { ...cached, pinUnlocked: recentUnlock };
+          setBoot(offlineBoot);
+          setDeviceId((old) => old || cached.devices[0]?.id || "");
+          setNotice({ kind: "info", text: "Offline mode: showing the last cached catalogue. Cash entries are local until reconciled; no card payments are available." });
+          return;
+        }
+      } catch {}
       setBoot(null);
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not connect to the POS backend." });
     } finally {
@@ -217,6 +259,7 @@ export default function Home() {
     setAuthBusy(true);
     try {
       await api("/api/employee/pin", { method: "POST", body: JSON.stringify({ pin }) });
+      try { sessionStorage.setItem("museum-pos-pin-unlocked-at", String(Date.now())); } catch {}
       setPin("");
       setNotice({ kind: "success", text: "Employee PIN verified. Sensitive operations are unlocked for 15 minutes." });
       await loadBootstrap();
