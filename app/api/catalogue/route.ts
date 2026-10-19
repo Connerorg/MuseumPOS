@@ -36,7 +36,7 @@ export async function POST(request: Request) {
   const valid = (body?.kind === "product" || body?.kind === "ticket") &&
     typeof body.code === "string" && /^[A-Za-z0-9_-]{2,40}$/.test(body.code.trim()) &&
     typeof body.name === "string" && body.name.trim().length >= 2 && body.name.trim().length <= 120 &&
-    typeof body.price_cents === "number" && Number.isSafeInteger(body.price_cents) && body.price_cents >= 0 &&
+    typeof body.price_cents === "number" && Number.isSafeInteger(body.price_cents) && Number(body.price_cents) >= 0 &&
     (body.description == null || (typeof body.description === "string" && body.description.length <= 500)) &&
     (body.track_inventory === undefined || typeof body.track_inventory === "boolean") &&
     Number.isSafeInteger(body.initial_stock ?? 0) && Number(body.initial_stock ?? 0) >= 0 &&
@@ -65,7 +65,7 @@ export async function PATCH(request: Request) {
   if ((body?.kind !== "product" && body?.kind !== "ticket") ||
       typeof body.item_id !== "string" || !uuidPattern.test(body.item_id) ||
       typeof body.name !== "string" || body.name.trim().length < 2 || body.name.trim().length > 120 ||
-      typeof body.price_cents !== "number" || !Number.isSafeInteger(body.price_cents) || body.price_cents < 0) {
+      typeof body.price_cents !== "number" || !Number.isSafeInteger(body.price_cents) || Number(body.price_cents) < 0) {
     return NextResponse.json({ error: "Catalogue update fields are invalid." }, { status: 400 });
   }
   try {
