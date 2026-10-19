@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAuthenticatedEmployeeId } from "@/lib/supabase/authenticated-employee";
+import { hasActivePinUnlock } from "@/lib/supabase/require-pin-unlock";
 import { createServiceSupabase } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -8,6 +9,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   const employeeId = await getAuthenticatedEmployeeId();
   if (!employeeId) return NextResponse.json({ error: "Employee sign-in required." }, { status: 401 });
+  if (!(await hasActivePinUnlock(employeeId))) return NextResponse.json({ error: "Unlock the employee PIN before continuing." }, { status: 423 });
   let body: { action?: unknown; device_id?: unknown; cash_session_id?: unknown; amount_cents?: unknown };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON." }, { status: 400 }); }
   const amount = body.amount_cents;
