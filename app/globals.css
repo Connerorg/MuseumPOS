@@ -32,3 +32,8 @@
 .sale-receipt small{overflow-wrap:anywhere;color:#54715d}
 .product-card:disabled{opacity:.45;cursor:not-allowed}
 @media(max-width:720px){.auth-card{padding:22px}.unlock-panel{align-items:stretch;flex-direction:column}.inline-form{align-items:stretch;flex-direction:column}.inline-form input{width:100%;min-width:0}.inline-form .primary-btn{width:100%}}
+
+.inventory-adjust{border-top:1px solid #e6ebe5;margin-top:22px;padding-top:20px}
+.inventory-adjust h3{margin:0 0 6px;font-size:15px;color:#243e32}
+.inventory-adjust>p{margin:0;font-size:12px}
+.inventory-adjust select{width:100%;border:1px solid #dce3dc;border-radius:10px;background:#fff;padding:12px 13px;color:#23382f;font:inherit}
