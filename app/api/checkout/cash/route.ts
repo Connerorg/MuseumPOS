@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { createServiceSupabase } from "@/lib/supabase/server";
+import { hasActivePinUnlock } from "@/lib/supabase/require-pin-unlock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -89,6 +90,7 @@ export async function POST(request: Request) {
   if (userError || !userData.user) {
     return badRequest("Sign in with an employee account before checkout.", 401);
   }
+  if (!(await hasActivePinUnlock(userData.user.id))) return badRequest("Unlock the employee PIN before checkout.", 423);
 
   try {
     const serviceClient = createServiceSupabase();
