@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type OfflineItem = { kind: "product" | "ticket"; id: string; quantity: number; expected_unit_price_cents: number };
-type OfflineSale = { device_id: string; cash_session_id: string; client_transaction_id: string; idempotency_key: string; payment_method: "cash"; source: "offline"; items: OfflineItem[] };
+type OfflineSale = { employee_id: string; device_id: string; cash_session_id: string; client_transaction_id: string; idempotency_key: string; payment_method: "cash"; source: "offline"; items: OfflineItem[] };
 
 export async function POST(request: Request) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -27,6 +27,7 @@ export async function POST(request: Request) {
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON." }, { status: 400 }); }
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   if (!body || body.source !== "offline" || body.payment_method !== "cash" ||
+      body.employee_id !== data.user.id ||
       !uuidPattern.test(body.device_id ?? "") || !uuidPattern.test(body.cash_session_id ?? "") ||
       !uuidPattern.test(body.client_transaction_id ?? "") ||
       typeof body.idempotency_key !== "string" || body.idempotency_key.trim().length < 8 ||
