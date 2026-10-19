@@ -126,7 +126,7 @@ export default function Home() {
   const [offlineEntries, setOfflineEntries] = useState<OfflineEntry[]>([]);
   const [isOnline, setIsOnline] = useState(true);
   const [syncBusy, setSyncBusy] = useState(false);
-  const [checkoutIds, setCheckoutIds] = useState<{ client_transaction_id: string; idempotency_key: string } | null>(null);
+  const [checkoutIds, setCheckoutIds] = useState<{ client_transaction_id: string; idempotency_key: string; fingerprint: string } | null>(null);
 
   const loadBootstrap = useCallback(async () => {
     setLoading(true);
@@ -380,8 +380,11 @@ export default function Home() {
 
   async function checkout() {
     if (!boot || !session || !deviceId || !cart.length) return;
-    const ids = checkoutIds ?? { client_transaction_id: uuid(), idempotency_key: uuid() };
-    if (!checkoutIds) setCheckoutIds(ids);
+    const fingerprint = JSON.stringify({ deviceId, sessionId: session.id, items: cart.map((line) => ({ kind: line.item.kind, id: line.item.id, quantity: line.quantity })) });
+    const ids = checkoutIds?.fingerprint === fingerprint
+      ? checkoutIds
+      : { client_transaction_id: uuid(), idempotency_key: uuid(), fingerprint };
+    if (checkoutIds?.fingerprint !== fingerprint) setCheckoutIds(ids);
     setAuthBusy(true); setLastSale(null);
     try {
       if (!navigator.onLine) {
