@@ -89,6 +89,13 @@ begin
     raise exception using errcode = '22023', message = 'open_cash_session_required';
   end if;
 
+  v_receipt := 'MUS-' || to_char(current_date, 'YYYYMMDD') || '-' || upper(substr(replace(v_sale_id::text, '-', ''), 1, 8));
+  insert into public.sales(id, receipt_number, device_id, cash_session_id, cashier_id,
+    client_transaction_id, idempotency_key, status, currency, subtotal_cents, tax_cents,
+    discount_cents, total_cents, tax_treatment)
+  values(v_sale_id, v_receipt, v_device_id, v_session_id, p_cashier_id,
+    v_client_tx, v_idempotency_key, 'pending', 'ZAR', 0, 0, 0, 0, 'unconfigured');
+
   for v_item in select value from jsonb_array_elements(p_request->'items')
   loop
     v_kind := v_item->>'kind';
@@ -169,13 +176,9 @@ begin
     raise exception using errcode = '22023', message = 'zero_total_checkout_not_allowed';
   end if;
 
-  v_receipt := 'MUS-' || to_char(current_date, 'YYYYMMDD') || '-' || upper(substr(replace(v_sale_id::text, '-', ''), 1, 8));
-  insert into public.sales(id, receipt_number, device_id, cash_session_id, cashier_id,
-    client_transaction_id, idempotency_key, status, currency, subtotal_cents, tax_cents,
-    discount_cents, total_cents, tax_treatment, completed_at)
-  values(v_sale_id, v_receipt, v_device_id, v_session_id, p_cashier_id,
-    v_client_tx, v_idempotency_key, 'completed', 'ZAR', v_subtotal, 0, 0, v_subtotal,
-    'unconfigured', now());
+  update public.sales
+  set status = 'completed', subtotal_cents = v_subtotal, total_cents = v_subtotal, completed_at = now()
+  where id = v_sale_id;
 
   insert into public.payments(sale_id, method, status, amount_cents, currency,
     terminal_reference, recorded_by, confirmed_at)
