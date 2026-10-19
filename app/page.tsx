@@ -289,7 +289,7 @@ export default function Home() {
       await client.auth.signOut();
     } finally {
       try { sessionStorage.removeItem("museum-pos-pin-unlocked-at"); } catch {}
-      setBoot(null); setSession(null); setCart([]); setPin("");
+      setBoot(null); setSession(null); setCart([]); setPin(""); setActive("Checkout"); setCheckoutIds(null);
       setNotice({ kind: "info", text: "Signed out." });
     }
   }
