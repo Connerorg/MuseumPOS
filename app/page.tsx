@@ -228,7 +228,7 @@ export default function Home() {
     }))),
     ...((boot?.products ?? []).map((p) => ({
       id: p.id, kind: "product" as const, name: p.name, code: p.sku, category: "Merchandise" as const,
-      price: boot?.priceRules.find((rule) => rule.product_id === p.id)?.unit_price_cents ?? p.unit_price_cents, detail: p.track_inventory ? `Stock: ${p.stock_on_hand}` : "Stock not tracked",
+      price: boot?.priceRules?.find((rule) => rule.product_id === p.id)?.unit_price_cents ?? p.unit_price_cents, detail: p.track_inventory ? `Stock: ${p.stock_on_hand}` : "Stock not tracked",
       stock: p.stock_on_hand, trackInventory: p.track_inventory,
     }))),
   ], [boot]);
