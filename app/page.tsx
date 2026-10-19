@@ -269,25 +269,99 @@ export default function Home() {
     } finally { setAuthBusy(false); }
   }
 
+  async function queueOfflineSale(ids: { client_transaction_id: string; idempotency_key: string }) {
+    if (!boot || !session || !cart.length) throw new Error("Open a cash session and add items before queueing an offline sale.");
+    const entry: OfflineEntry = {
+      id: ids.idempotency_key,
+      created_at: new Date().toISOString(),
+      device_id: deviceId,
+      cash_session_id: session.id,
+      client_transaction_id: ids.client_transaction_id,
+      idempotency_key: ids.idempotency_key,
+      payment_method: "cash",
+      source: "offline",
+      items: cart.map(({ item, quantity }) => ({ kind: item.kind, id: item.id, quantity, expected_unit_price_cents: item.price })),
+      display_items: cart.map(({ item, quantity }) => ({ name: item.name, quantity, unit_price_cents: item.price })),
+      status: "queued",
+    };
+    await saveOfflineEntry(entry);
+    setOfflineEntries((old) => [entry, ...old.filter((x) => x.id !== entry.id)]);
+    setCart([]);
+    setCheckoutIds(null);
+    setActive("Offline queue");
+    setNotice({ kind: "info", text: "Cash entry saved locally. It is not yet in the official ledger; keep this till session open until it syncs." });
+  }
+
+  async function syncOfflineEntries() {
+    if (!isOnline || !boot || !boot.pinUnlocked) {
+      setNotice({ kind: "error", text: "Connect to the network and unlock your employee PIN before syncing." });
+      return;
+    }
+    const pending = offlineEntries.filter((entry) => entry.status === "queued");
+    if (!pending.length) {
+      setNotice({ kind: "info", text: "There are no queued entries to sync. Conflicts require manager review." });
+      return;
+    }
+    setSyncBusy(true);
+    let synced = 0;
+    try {
+      for (const entry of pending) {
+        try {
+          const result = await api<{ sale: { receipt_number?: string; status?: string } }>("/api/offline/sync", {
+            method: "POST",
+            body: JSON.stringify({
+              device_id: entry.device_id, cash_session_id: entry.cash_session_id,
+              client_transaction_id: entry.client_transaction_id, idempotency_key: entry.idempotency_key,
+              payment_method: "cash", source: "offline", items: entry.items,
+            }),
+          });
+          const updated: OfflineEntry = { ...entry, status: "synced", receipt_number: result.sale.receipt_number };
+          await saveOfflineEntry(updated);
+          setOfflineEntries((old) => old.map((x) => x.id === entry.id ? updated : x));
+          synced += 1;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Sync failed.";
+          const updated: OfflineEntry = { ...entry, status: message.toLowerCase().includes("changed") || message.toLowerCase().includes("review") || message.toLowerCase().includes("insufficient") ? "conflict" : "queued", error: message };
+          await saveOfflineEntry(updated);
+          setOfflineEntries((old) => old.map((x) => x.id === entry.id ? updated : x));
+        }
+      }
+      await loadBootstrap();
+      setNotice({ kind: synced ? "success" : "error", text: `${synced} offline entry/entries synced. Any entries marked conflict need manager review; unsynced entries remain in the local queue.` });
+    } finally { setSyncBusy(false); }
+  }
+
   async function checkout() {
     if (!boot || !session || !deviceId || !cart.length) return;
+    const ids = checkoutIds ?? { client_transaction_id: uuid(), idempotency_key: uuid() };
+    if (!checkoutIds) setCheckoutIds(ids);
     setAuthBusy(true); setLastSale(null);
     try {
+      if (!navigator.onLine) {
+        await queueOfflineSale(ids);
+        return;
+      }
       const result = await api<{ sale: { sale_id: string; receipt_number: string; total_cents: number; status: string } }>("/api/checkout/cash", {
         method: "POST",
         body: JSON.stringify({
           device_id: deviceId, cash_session_id: session.id,
-          client_transaction_id: uuid(), idempotency_key: uuid(),
+          client_transaction_id: ids.client_transaction_id, idempotency_key: ids.idempotency_key,
           payment_method: "cash",
           items: cart.map((line) => ({ kind: line.item.kind, id: line.item.id, quantity: line.quantity })),
         }),
       });
       setLastSale(result.sale);
       setCart([]);
+      setCheckoutIds(null);
       await loadBootstrap();
       setNotice({ kind: "success", text: `Sale completed: ${result.sale.receipt_number}. Cash payment was recorded in the database.` });
     } catch (error) {
-      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Checkout result could not be confirmed. Check the sales ledger before retrying." });
+      if (!navigator.onLine) {
+        try { await queueOfflineSale(ids); }
+        catch (queueError) { setNotice({ kind: "error", text: queueError instanceof Error ? queueError.message : "The result is uncertain and could not be queued. Keep the basket and retry with the same idempotency key when online." }); }
+      } else {
+        setNotice({ kind: "error", text: error instanceof Error ? error.message : "Checkout result could not be confirmed. Retry safely; the same idempotency key is retained." });
+      }
     } finally { setAuthBusy(false); }
   }
 
@@ -382,6 +456,10 @@ export default function Home() {
   async function closeSession(event: FormEvent) {
     event.preventDefault();
     if (!session) return;
+    if (offlineEntries.some((entry) => entry.cash_session_id === session.id && entry.status !== "synced")) {
+      setNotice({ kind: "error", text: "This session has unsynced offline entries. Sync them or resolve conflicts before closing the till." });
+      return;
+    }
     setAuthBusy(true);
     try {
       const amount = Math.round(Number(countedCash) * 100);
@@ -453,12 +531,13 @@ export default function Home() {
           <div className="cart-body">{cart.length === 0 ? <div className="empty-cart">🧺<p>Your basket is empty</p><span>Choose an item from the live catalogue.</span></div> : cart.map(({ item, quantity }) => <div className="cart-item" key={item.id}><div><div className="cart-item-name">{item.name}</div><div className="cart-item-price">{money(item.price)} each</div></div><div className="qty-controls"><button aria-label={"Remove one " + item.name} onClick={() => changeQty(item.id, -1)}>−</button><span>{quantity}</span><button aria-label={"Add one " + item.name} onClick={() => changeQty(item.id, 1)}>+</button></div></div>)}</div>
           <div className="cart-summary"><div className="sum-row"><span>Subtotal</span><span>{money(total)}</span></div><div className="sum-row"><span>Tax</span><span>Unconfigured</span></div><div className="sum-row total"><span>Total before configured tax</span><span>{money(total)}</span></div>
             {!session ? <div className="notice notice-info">Open a cash session before completing sales.</div> : <div className="notice notice-info">Cash only. Card terminal processing is not configured.</div>}
-            <button className="primary-btn" disabled={!pinUnlocked || !session || !cart.length || total <= 0 || authBusy} onClick={checkout}>{authBusy ? "Processing…" : "Complete cash sale"}</button>
+            <button className="primary-btn" disabled={!pinUnlocked || !session || !cart.length || total <= 0 || authBusy} onClick={checkout}>{authBusy ? "Processing…" : (isOnline ? "Complete cash sale" : "Queue offline cash sale")}</button>
             {lastSale && <div className="sale-receipt"><strong>Sale completed</strong><div>Receipt: {lastSale.receipt_number}</div><div>Total: {money(lastSale.total_cents)}</div><small>Sale ID: {lastSale.sale_id}</small></div>}
             <div className="helper">Tax treatment remains unconfigured pending management/accounting confirmation. Do not use for real sales until this is confirmed.</div>
           </div>
         </section>
       </div>}
+      {active === "Offline queue" && <section className="panel section-panel"><div className="panel-head"><div><h2>Offline cash queue</h2><p className="subtle">Entries are stored in this browser and become official sales only after server reconciliation.</p></div><button className="primary-btn" disabled={!isOnline || !boot.pinUnlocked || syncBusy || !offlineEntries.some((e) => e.status === "queued")} onClick={() => void syncOfflineEntries()}>{syncBusy ? "Syncing…" : "Sync queued entries"}</button></div><div className={`notice notice-${isOnline ? "info" : "error"}`}>{isOnline ? "Network available. PIN must be unlocked to sync." : "Offline. Only cash entries may be queued; do not close the related till session before synchronization."}</div><div className="stat-cards"><div className="stat-card"><span>Queued</span><strong>{offlineEntries.filter((e) => e.status === "queued").length}</strong></div><div className="stat-card"><span>Conflicts</span><strong>{offlineEntries.filter((e) => e.status === "conflict").length}</strong></div><div className="stat-card"><span>Synced</span><strong>{offlineEntries.filter((e) => e.status === "synced").length}</strong></div><div className="stat-card"><span>Local queued value</span><strong>{money(offlineEntries.filter((e) => e.status !== "synced").reduce((sum, e) => sum + e.display_items.reduce((s, item) => s + item.unit_price_cents * item.quantity, 0), 0))}</strong></div></div><div className="table-wrap"><table className="data-table"><thead><tr><th>Local reference</th><th>Created</th><th>Items</th><th>Value</th><th>Status</th><th>Result</th></tr></thead><tbody>{offlineEntries.map((entry) => <tr key={entry.id}><td>{entry.id.slice(0,8).toUpperCase()}</td><td>{new Date(entry.created_at).toLocaleString("en-ZA")}</td><td>{entry.display_items.reduce((n, i) => n + i.quantity, 0)}</td><td>{money(entry.display_items.reduce((sum, i) => sum + i.quantity * i.unit_price_cents, 0))}</td><td><span className={entry.status === "synced" ? "status" : "status pending"}>{entry.status}</span></td><td>{entry.receipt_number ?? entry.error ?? "Waiting for sync"}</td></tr>)}</tbody></table>{offlineEntries.length === 0 && <div className="empty-state">No offline cash entries on this device.</div>}</div><div className="helper">The sync endpoint checks the cached price against the live catalogue, preserves idempotency, and refuses entries whose price, stock or session no longer matches. Conflicts require manager review; never delete a conflict to hide a till discrepancy.</div></section>}
       {active === "Tickets" && <section className="panel section-panel"><div className="panel-head"><div><h2>Validate admission ticket</h2><p className="subtle">Scan a barcode with a USB scanner or enter the ticket code.</p></div></div><form className="inline-form" onSubmit={redeemTicket}><input aria-label="Ticket barcode" placeholder="Scan barcode or ticket code" autoComplete="off" required minLength={8} maxLength={128} value={barcode} onChange={(e) => setBarcode(e.target.value)} /><button className="primary-btn" disabled={!pinUnlocked || authBusy}>{authBusy ? "Validating…" : "Validate and redeem"}</button></form>{lastTicket && <div className="sale-receipt"><strong>Admission accepted</strong><div>Ticket: {lastTicket.ticket_code}</div><div>Status: {lastTicket.status}</div><div>Redeemed: {new Date(lastTicket.redeemed_at).toLocaleString("en-ZA")}</div></div>}<div className="helper">Redemption is one-time only. An already redeemed or invalid ticket is rejected by the database.</div></section>}
       {active === "Refunds" && <section className="panel section-panel"><div className="panel-head"><div><h2>Full-sale cash refunds</h2><p className="subtle">Refund requests require independent manager approval. Card refunds are disabled until a payment-provider workflow exists.</p></div><button className="secondary-btn" onClick={() => void loadRefunds()}>Refresh</button></div><div className="notice notice-info">Current workflow supports full-sale cash refunds only. Completion requires an open cash session and a manager/administrator. Confirm the customer has physically received the cash before completing.</div><form className="session-form refund-request-form" onSubmit={requestRefund}><label>Sale to refund<select required value={refundSaleId} onChange={(e) => setRefundSaleId(e.target.value)}><option value="">Select a completed sale</option>{(refundData?.sales ?? []).map((s) => <option key={s.id} value={s.id}>{s.receipt_number ?? s.id.slice(0,8)} · {money(s.total_cents)} · {new Date(s.created_at).toLocaleString("en-ZA")}</option>)}</select></label>{refundSaleId && <div className="subtle">Refund amount: {money(refundData?.sales.find((s) => s.id === refundSaleId)?.total_cents ?? 0)} (full sale only)</div>}<label>Reason for refund<input required minLength={3} maxLength={500} value={refundReason} onChange={(e) => setRefundReason(e.target.value)} placeholder="Reason supplied by customer" /></label><button className="primary-btn" disabled={!pinUnlocked || refundBusy || !refundSaleId}>Request refund approval</button></form><div className="inventory-adjust"><h3>Refund approval queue</h3><p className="subtle">The requesting employee cannot approve their own request.</p><label className="field-label">Decision reason<input value={refundDecisionReason} onChange={(e) => setRefundDecisionReason(e.target.value)} minLength={3} maxLength={500} placeholder="Reason for approving or rejecting" /></label><label className="restock-option"><input type="checkbox" checked={restockRefundedItems} onChange={(e) => setRestockRefundedItems(e.target.checked)} /> Restock returned merchandise items (confirm items are fit to return to stock)</label><div className="table-wrap"><table className="data-table"><thead><tr><th>Refund</th><th>Sale</th><th>Amount</th><th>Reason</th><th>Status</th><th>Action</th></tr></thead><tbody>{(refundData?.refunds ?? []).map((r) => <tr key={r.id}><td>{r.id.slice(0,8).toUpperCase()}</td><td>{r.sale_id.slice(0,8).toUpperCase()}</td><td>{money(r.amount_cents)}</td><td>{r.reason}</td><td>{r.status}</td><td>{r.status === "pending" && refundData?.canApprove ? <div className="row-actions"><button className="secondary-btn" disabled={refundBusy || refundDecisionReason.trim().length < 3} onClick={() => void decideRefund(r.id, false)}>Reject</button><button className="primary-btn" disabled={refundBusy || refundDecisionReason.trim().length < 3} onClick={() => void decideRefund(r.id, true)}>Approve</button></div> : r.status === "approved" && refundData?.canApprove ? <button className="primary-btn" disabled={refundBusy || !session} onClick={() => void completeRefund(r.id)}>Complete cash refund</button> : "—"}</td></tr>)}</tbody></table>{(refundData?.refunds.length ?? 0) === 0 && <div className="empty-state">No refund requests found.</div>}</div></div><div className="helper">Refund approval and completion are audited. Completing a refund updates the sale status, cash ledger and valid ticket statuses. Restock only items physically returned in resalable condition.</div></section>}
       {active === "Inventory" && <section className="panel section-panel"><div className="panel-head"><div><h2>Stock on hand</h2><p className="subtle">Current active product stock from Supabase.</p></div></div><div className="table-wrap"><table className="data-table"><thead><tr><th>SKU</th><th>Product</th><th>Price</th><th>Stock</th><th>Reorder level</th><th>Status</th></tr></thead><tbody>{(boot.products ?? []).map((p) => <tr key={p.id}><td>{p.sku}</td><td>{p.name}</td><td>{money(p.unit_price_cents)}</td><td>{p.track_inventory ? p.stock_on_hand : "Not tracked"}</td><td>{p.track_inventory ? p.reorder_level : "—"}</td><td><span className={p.track_inventory && p.stock_on_hand <= p.reorder_level ? "status pending" : "status"}>{p.track_inventory && p.stock_on_hand <= p.reorder_level ? "Reorder" : "OK"}</span></td></tr>)}</tbody></table></div><div className="inventory-adjust"><h3>Record stock movement</h3><p className="subtle">Requires a supervisor, manager or administrator role and an unlocked PIN.</p><form className="session-form" onSubmit={adjustInventory}><label>Product<select required value={inventoryProductId} onChange={(e) => setInventoryProductId(e.target.value)}><option value="">Select tracked product</option>{boot.products.filter((p) => p.track_inventory).map((p) => <option key={p.id} value={p.id}>{p.name} · {p.sku}</option>)}</select></label><label>Movement type<select value={inventoryMovement} onChange={(e) => setInventoryMovement(e.target.value)}><option value="restock">Restock</option><option value="adjustment">Stock correction</option><option value="return">Return to stock</option><option value="waste">Waste / damage</option><option value="opening_balance">Opening balance</option></select></label><label>Quantity change (+ in, − out)<input type="number" step="1" required value={inventoryDelta} onChange={(e) => setInventoryDelta(e.target.value)} /></label><label>Reason<input required minLength={3} maxLength={500} value={inventoryReason} onChange={(e) => setInventoryReason(e.target.value)} placeholder="e.g. supplier delivery reference" /></label><button className="primary-btn" disabled={!pinUnlocked || !inventoryProductId || authBusy}>Save stock movement</button></form></div><div className="helper">Completed sales reduce tracked stock in the same database transaction. All manual movements are recorded with a reason and audit entry.</div></section>}
