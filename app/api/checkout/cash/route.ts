@@ -94,6 +94,24 @@ export async function POST(request: Request) {
 
   try {
     const serviceClient = createServiceSupabase();
+    const { data: existingSale, error: existingError } = await serviceClient.from("sales")
+      .select("id,cashier_id").eq("idempotency_key", body.idempotency_key.trim()).maybeSingle();
+    if (existingError) return badRequest("Could not verify checkout retry state.", 503);
+    if (!existingSale) {
+      const [employeeResult, sessionResult] = await Promise.all([
+        serviceClient.from("employee_profiles").select("role,active").eq("id", userData.user.id).maybeSingle(),
+        serviceClient.from("cash_sessions").select("id,device_id,opened_by,status").eq("id", body.cash_session_id).maybeSingle(),
+      ]);
+      if (!employeeResult.data?.active) return badRequest("This employee account is inactive or not provisioned.", 403);
+      if (!sessionResult.data || sessionResult.data.device_id !== body.device_id || sessionResult.data.status !== "open") {
+        return badRequest("Open a cash session for this device first.", 409);
+      }
+      if (sessionResult.data.opened_by !== userData.user.id && !["manager", "administrator"].includes(employeeResult.data.role)) {
+        return badRequest("Only the session owner or a manager can record sales in this till session.", 403);
+      }
+    } else if (existingSale.cashier_id !== userData.user.id) {
+      return badRequest("This checkout key belongs to another employee.", 409);
+    }
     const { data, error } = await serviceClient.rpc("complete_cash_sale", {
       p_cashier_id: userData.user.id,
       p_request: {
