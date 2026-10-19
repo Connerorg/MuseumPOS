@@ -37,3 +37,9 @@
 .inventory-adjust h3{margin:0 0 6px;font-size:15px;color:#243e32}
 .inventory-adjust>p{margin:0;font-size:12px}
 .inventory-adjust select{width:100%;border:1px solid #dce3dc;border-radius:10px;background:#fff;padding:12px 13px;color:#23382f;font:inherit}
+
+.report-filters{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin:18px 0}
+.report-filters label{display:grid;gap:6px;font-size:12px;color:#42544a;font-weight:650}
+.report-filters input{border:1px solid #dce3dc;border-radius:10px;padding:11px;background:#fff;color:#23382f;font:inherit}
+.report-heading{font-size:14px;color:#243e32;margin:24px 0 10px}
+@media(max-width:560px){.report-filters{align-items:stretch;flex-direction:column}.report-filters label,.report-filters input{width:100%}}
