@@ -51,3 +51,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ item: data }, { headers: { "Cache-Control": "no-store" } });
   } catch { return NextResponse.json({ error: "Catalogue service unavailable." }, { status: 503 }); }
 }
+
+export async function PATCH(request: Request) {
+  const ctx = await authorize();
+  if ("response" in ctx) return ctx.response;
+  let body: any;
+  try { body = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON." }, { status: 400 }); }
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if ((body?.kind !== "product" && body?.kind !== "ticket") ||
+      typeof body.item_id !== "string" || !uuidPattern.test(body.item_id) ||
+      typeof body.name !== "string" || body.name.trim().length < 2 || body.name.trim().length > 120 ||
+      !Number.isSafeInteger(body.price_cents) || body.price_cents < 0) {
+    return NextResponse.json({ error: "Catalogue update fields are invalid." }, { status: 400 });
+  }
+  try {
+    const { data, error } = await ctx.db.rpc("update_catalogue_item", {
+      p_actor_id: ctx.actorId, p_kind: body.kind, p_item_id: body.item_id,
+      p_name: body.name.trim(), p_price_cents: body.price_cents,
+    });
+    if (error) return NextResponse.json({ error: "Catalogue update failed. Confirm the item is active and the migration is applied." }, { status: 409 });
+    return NextResponse.json({ item: data }, { headers: { "Cache-Control": "no-store" } });
+  } catch { return NextResponse.json({ error: "Catalogue service unavailable." }, { status: 503 }); }
+}
