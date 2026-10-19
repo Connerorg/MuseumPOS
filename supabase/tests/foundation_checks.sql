@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(14);
+select extensions.plan(17);
 select extensions.has_table('public','employee_profiles','employee profiles table exists');
 select extensions.has_table('public','sales','sales table exists');
 select extensions.has_table('public','payments','payments table exists');
@@ -15,5 +15,8 @@ select extensions.ok(not has_function_privilege('anon','public.complete_cash_sal
 select extensions.ok(not has_function_privilege('authenticated','public.complete_cash_sale(uuid,jsonb)','execute'),'authenticated cannot execute checkout RPC directly');
 select extensions.ok(not has_table_privilege('authenticated','private.employee_pin_unlocks','select'),'authenticated cannot read PIN unlock records');
 select extensions.ok(exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='sync_offline_cash_sale'),'offline sync RPC exists');
+select extensions.ok(exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='complete_cash_refund'),'cash refund completion RPC exists');
+select extensions.ok(exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='create_catalogue_item'),'catalogue creation RPC exists');
+select extensions.ok(not has_function_privilege('authenticated','public.register_pos_device(uuid,text,text)','execute'),'authenticated cannot call device registration RPC directly');
 select * from extensions.finish();
 rollback;
