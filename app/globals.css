@@ -51,3 +51,17 @@
 .restock-option input{width:16px;height:16px;accent-color:#315b47}
 .refund-request-form{max-width:620px}
 @media(max-width:560px){.row-actions{flex-direction:column;align-items:stretch}}
+
+.ticket-barcode{display:block;width:min(100%,320px);height:auto;max-height:68px;background:#fff;margin:5px 0}
+.receipt-line{display:flex;justify-content:space-between;gap:12px;font-size:12px}
+.issued-ticket-list{display:grid;gap:10px;margin-top:8px}
+.issued-ticket{display:grid;gap:4px;border:1px dashed #b9c9bb;background:#fff;padding:10px;border-radius:6px;overflow-wrap:anywhere}
+.barcode-text{font-family:monospace;font-size:10px;letter-spacing:1px}
+@media print{
+  body *{visibility:hidden!important}
+  .print-receipt,.print-receipt *{visibility:visible!important}
+  .print-receipt{position:absolute!important;left:0!important;top:0!important;width:100%!important;max-width:100%!important;margin:0!important;padding:10mm!important;border:0!important;box-shadow:none!important;background:#fff!important;color:#000!important}
+  .no-print{display:none!important}
+  .ticket-barcode{max-width:85mm;max-height:22mm}
+  .issued-ticket{break-inside:avoid;border:1px solid #aaa}
+}
