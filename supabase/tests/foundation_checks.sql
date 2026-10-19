@@ -1,0 +1,15 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+select plan(10);
+select has_table('public','employee_profiles','employee profiles table exists');
+select has_table('public','sales','sales table exists');
+select has_table('public','payments','payments table exists');
+select has_table('public','issued_tickets','issued tickets table exists');
+select is((select count(*)::integer from public.sale_categories),4,'four sale categories seeded');
+select is((select count(*)::integer from public.ticket_types where (code='adult' and base_price_cents=6000) or (code='child' and base_price_cents=4000)),2,'draft adult and child prices seeded in cents');
+select is((select count(*)::integer from public.price_rules where category_code in ('group','school','event')),0,'group school and event prices are not invented');
+select ok((select count(*)=0 from pg_tables where schemaname='public' and not rowsecurity),'RLS enabled on every public table');
+select ok(not has_table_privilege('anon','public.sales','select'),'anon cannot read sales directly');
+select ok(not has_table_privilege('authenticated','public.sales','insert'),'authenticated users cannot insert sales directly');
+select * from finish();
+rollback;
