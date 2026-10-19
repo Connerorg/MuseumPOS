@@ -22,11 +22,12 @@ export async function GET(request: Request) {
   const from = params.get("from");
   const to = params.get("to");
   const validDate = (value: string | null) => Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value + "T00:00:00Z")));
-  if (!validDate(from) || !validDate(to) || new Date(to + "T00:00:00Z") <= new Date(from + "T00:00:00Z")) {
-    return NextResponse.json({ error: "Provide a valid date range with the end after the start." }, { status: 400 });
+  if (!validDate(from) || !validDate(to) || new Date(to + "T00:00:00Z") < new Date(from + "T00:00:00Z")) {
+    return NextResponse.json({ error: "Provide a valid date range with the end date on or after the start date." }, { status: 400 });
   }
   const start = new Date(from + "T00:00:00Z");
   const end = new Date(to + "T00:00:00Z");
+  end.setUTCDate(end.getUTCDate() + 1);
   if ((end.getTime() - start.getTime()) / 86400000 > 366) return NextResponse.json({ error: "Report range cannot exceed 366 days." }, { status: 400 });
 
   try {
