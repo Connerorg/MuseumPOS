@@ -27,7 +27,7 @@ begin
   select * into v_actor from public.employee_profiles where id=p_actor_id and active=true;
   if not found then raise exception using errcode='42501', message='active_employee_required'; end if;
   select * into v_sale from public.sales where id=p_sale_id for update;
-  if not found or v_sale.status not in ('completed','partially_refunded') then
+  if not found or v_sale.status <> 'completed' then
     raise exception using errcode='22023', message='completed_sale_required';
   end if;
   if v_sale.cashier_id <> p_actor_id and v_actor.role not in ('supervisor','manager','administrator') then
@@ -117,6 +117,7 @@ declare
   v_sale public.sales%rowtype;
   v_session public.cash_sessions%rowtype;
   v_item record;
+  v_available bigint;
 begin
   select * into v_actor from public.employee_profiles where id=p_actor_id and active=true;
   if not found or v_actor.role not in ('manager','administrator') then
@@ -136,6 +137,20 @@ begin
   select * into v_session from public.cash_sessions
     where id=p_cash_session_id and status='open' for update;
   if not found then raise exception using errcode='22023', message='open_cash_session_required'; end if;
+  select v_session.opening_float_cents + coalesce(sum(
+    case movement_type
+      when 'cash_sale' then amount_cents
+      when 'paid_in' then amount_cents
+      when 'float_adjustment' then amount_cents
+      when 'refund' then -amount_cents
+      when 'paid_out' then -amount_cents
+      else 0
+    end
+  ),0) into v_available
+  from public.cash_movements where cash_session_id=p_cash_session_id;
+  if v_available < v_refund.amount_cents then
+    raise exception using errcode='22000', message='insufficient_cash_for_refund';
+  end if;
 
   insert into public.cash_movements(cash_session_id,movement_type,amount_cents,reference,created_by)
   values(p_cash_session_id,'refund',v_refund.amount_cents,'Refund '||p_refund_id::text,p_actor_id);
