@@ -127,6 +127,18 @@ export default function Home() {
   const [employeePin, setEmployeePin] = useState("");
   const [deviceCode, setDeviceCode] = useState("");
   const [deviceName, setDeviceName] = useState("");
+  const [catalogueKind, setCatalogueKind] = useState<"product" | "ticket">("product");
+  const [catalogueCode, setCatalogueCode] = useState("");
+  const [catalogueName, setCatalogueName] = useState("");
+  const [catalogueDescription, setCatalogueDescription] = useState("");
+  const [cataloguePrice, setCataloguePrice] = useState("");
+  const [catalogueTrack, setCatalogueTrack] = useState(true);
+  const [catalogueInitialStock, setCatalogueInitialStock] = useState("0");
+  const [catalogueReorder, setCatalogueReorder] = useState("0");
+  const [updateCatalogueId, setUpdateCatalogueId] = useState("");
+  const [updateCatalogueKind, setUpdateCatalogueKind] = useState<"product" | "ticket">("product");
+  const [updateCatalogueName, setUpdateCatalogueName] = useState("");
+  const [updateCataloguePrice, setUpdateCataloguePrice] = useState("");
   const [offlineEntries, setOfflineEntries] = useState<OfflineEntry[]>([]);
   const [isOnline, setIsOnline] = useState(true);
   const [syncBusy, setSyncBusy] = useState(false);
@@ -440,6 +452,48 @@ export default function Home() {
     } finally { setAuthBusy(false); }
   }
 
+  async function createCatalogueItem(event: FormEvent) {
+    event.preventDefault();
+    setRefundBusy(true);
+    try {
+      const price = Math.round(Number(cataloguePrice) * 100);
+      const initialStock = Number(catalogueInitialStock);
+      const reorder = Number(catalogueReorder);
+      if (!Number.isSafeInteger(price) || price < 0) throw new Error("Enter a valid non-negative price.");
+      if (!Number.isSafeInteger(initialStock) || initialStock < 0 || !Number.isSafeInteger(reorder) || reorder < 0) throw new Error("Stock values must be whole non-negative numbers.");
+      await api("/api/catalogue", { method: "POST", body: JSON.stringify({
+        kind: catalogueKind, code: catalogueCode.trim(), name: catalogueName.trim(),
+        description: catalogueDescription.trim(), price_cents: price,
+        track_inventory: catalogueKind === "product" && catalogueTrack,
+        initial_stock: catalogueKind === "product" && catalogueTrack ? initialStock : 0,
+        reorder_level: catalogueKind === "product" && catalogueTrack ? reorder : 0,
+      }) });
+      setCatalogueCode(""); setCatalogueName(""); setCatalogueDescription(""); setCataloguePrice("");
+      setCatalogueInitialStock("0"); setCatalogueReorder("0");
+      setNotice({ kind: "success", text: "Catalogue item created with an audited price and stock setup." });
+      await loadBootstrap();
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not create catalogue item." });
+    } finally { setRefundBusy(false); }
+  }
+
+  async function updateCatalogueItem(event: FormEvent) {
+    event.preventDefault();
+    setRefundBusy(true);
+    try {
+      const price = Math.round(Number(updateCataloguePrice) * 100);
+      if (!Number.isSafeInteger(price) || price < 0) throw new Error("Enter a valid non-negative price.");
+      await api("/api/catalogue", { method: "PATCH", body: JSON.stringify({
+        kind: updateCatalogueKind, item_id: updateCatalogueId,
+        name: updateCatalogueName.trim(), price_cents: price,
+      }) });
+      setNotice({ kind: "success", text: "Catalogue name and individual price updated. The price history was preserved." });
+      await loadBootstrap();
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not update catalogue item." });
+    } finally { setRefundBusy(false); }
+  }
+
   async function registerDevice(event: FormEvent) {
     event.preventDefault();
     setRefundBusy(true);
@@ -564,11 +618,11 @@ export default function Home() {
   }
 
   const nav = [
-    { name: "Checkout", icon: "▦" }, { name: "Offline queue", icon: "↻" }, { name: "Tickets", icon: "▤" }, { name: "Refunds", icon: "↩" }, { name: "Employees", icon: "E" }, { name: "Devices", icon: "▣" },
+    { name: "Checkout", icon: "▦" }, { name: "Offline queue", icon: "↻" }, { name: "Tickets", icon: "▤" }, { name: "Refunds", icon: "↩" }, { name: "Employees", icon: "E" }, { name: "Devices", icon: "▣" }, { name: "Catalogue", icon: "≡" },
     { name: "Inventory", icon: "▣" }, { name: "Cash-up", icon: "◷" }, { name: "Reports", icon: "▥" },
   ];
   const headings: Record<string, string> = {
-    Devices: "POS device management", Employees: "Employee access", Checkout: "Point of sale", "Offline queue": "Offline cash synchronization", Tickets: "Ticket admission", Refunds: "Refund requests", Inventory: "Inventory",
+    Catalogue: "Catalogue and pricing", Devices: "POS device management", Employees: "Employee access", Checkout: "Point of sale", "Offline queue": "Offline cash synchronization", Tickets: "Ticket admission", Refunds: "Refund requests", Inventory: "Inventory",
     "Cash-up": "Cash-up & reconciliation", Reports: "Sales reports",
   };
 
@@ -593,7 +647,7 @@ export default function Home() {
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark">M</div><div><strong>Museum POS</strong><small>Ticketing &amp; sales</small></div></div>
-      <div><div className="nav-label">Workspace</div><nav className="nav" aria-label="Main navigation">{nav.filter((item) => (item.name !== "Employees" && item.name !== "Devices") || ["manager", "administrator"].includes(boot.employee.role)).map((item) => <button key={item.name} className={active === item.name ? "active" : ""} onClick={() => setActive(item.name)}><span className="nav-icon">{item.icon}</span>{item.name}</button>)}</nav></div>
+      <div><div className="nav-label">Workspace</div><nav className="nav" aria-label="Main navigation">{nav.filter((item) => (item.name !== "Employees" && item.name !== "Devices" && item.name !== "Catalogue") || ["manager", "administrator"].includes(boot.employee.role)).map((item) => <button key={item.name} className={active === item.name ? "active" : ""} onClick={() => setActive(item.name)}><span className="nav-icon">{item.icon}</span>{item.name}</button>)}</nav></div>
       <div className="side-bottom"><span className="online-dot" /> Supabase connected<br />{boot.employee.display_name} · {boot.employee.role}<br /><br /><button className="secondary-btn" onClick={signOut}>Sign out</button></div>
     </aside>
     <main className="main">
