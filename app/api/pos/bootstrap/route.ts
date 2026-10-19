@@ -40,14 +40,16 @@ export async function GET() {
     const { data: pinUnlocked, error: pinError } = await db.rpc("require_employee_pin_unlock", { p_employee_id: auth.user.id });
     if (pinError) return NextResponse.json({ error: "PIN unlock migration is not applied. Apply the Supabase migrations before using the POS." }, { status: 503 });
 
-    const [tickets, products, devices, sessions, categories] = await Promise.all([
+    const now = new Date().toISOString();
+    const [tickets, products, devices, sessions, categories, priceRules] = await Promise.all([
       db.from("ticket_types").select("id,code,name,description,base_price_cents,currency,active").eq("active", true).order("name"),
       db.from("products").select("id,sku,barcode,name,description,category_id,unit_price_cents,currency,track_inventory,stock_on_hand,reorder_level,active").eq("active", true).order("name"),
       db.from("pos_devices").select("id,device_code,display_name,active").eq("active", true).order("display_name"),
       db.from("cash_sessions").select("id,device_id,opened_by,status,opening_float_cents,opened_at").eq("status", "open").order("opened_at", { ascending: false }),
       db.from("sale_categories").select("id,code,name,active").eq("active", true).order("sort_order"),
+      db.from("price_rules").select("id,ticket_type_id,product_id,unit_price_cents,valid_from").eq("category_code", "individual").lte("valid_from", now).or("valid_until.is.null,valid_until.gt." + now).order("valid_from", { ascending: false }),
     ]);
-    const failed = [tickets, products, devices, sessions, categories].find((result) => result.error);
+    const failed = [tickets, products, devices, sessions, categories, priceRules].find((result) => result.error);
     if (failed?.error) return NextResponse.json({ error: "Could not load the POS catalogue. Confirm that database migrations have been applied." }, { status: 503 });
 
     return NextResponse.json({
@@ -57,6 +59,7 @@ export async function GET() {
       devices: devices.data ?? [],
       openSessions: sessions.data ?? [],
       categories: categories.data ?? [],
+      priceRules: priceRules.data ?? [],
       pinUnlocked: pinUnlocked === true,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch {
