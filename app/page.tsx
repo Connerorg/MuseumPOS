@@ -163,6 +163,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if ("serviceWorker" in navigator) void navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     const updateOnline = () => setIsOnline(navigator.onLine);
     updateOnline();
     window.addEventListener("online", updateOnline);
