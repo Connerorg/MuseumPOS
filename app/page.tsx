@@ -10,7 +10,7 @@ type Device = { id: string; device_code: string; display_name: string };
 type CashSession = { id: string; device_id: string; opened_by: string; status: string; opening_float_cents: number; opened_at: string };
 type Category = { id: string; code: string; name: string };
 type CatalogItem = { id: string; kind: "ticket" | "product"; name: string; code: string; category: "Tickets" | "Merchandise"; price: number; detail: string; stock?: number; trackInventory?: boolean };
-type Bootstrap = { employee: Employee; ticketTypes: TicketType[]; products: Product[]; devices: Device[]; openSessions: CashSession[]; categories: Category[]; pinUnlocked: boolean };
+type Bootstrap = { employee: Employee; ticketTypes: TicketType[]; products: Product[]; devices: Device[]; openSessions: CashSession[]; categories: Category[]; priceRules: { id: string; ticket_type_id: string | null; product_id: string | null; unit_price_cents: number; valid_from: string }[]; pinUnlocked: boolean };
 type CartLine = { item: CatalogItem; quantity: number };
 type Notice = { kind: "success" | "error" | "info"; text: string };
 type Report = { period: { from: string; to: string }; totals: { sales_count: number; gross_sales_cents: number; refunds_count: number; refunds_cents: number; net_after_refunds_cents: number }; sales: { id: string; receipt_number: string | null; status: string; total_cents: number; created_at: string }[]; refunds: { id: string; sale_id: string; amount_cents: number; status: string; created_at: string }[]; truncated: boolean };
@@ -224,11 +224,11 @@ export default function Home() {
   const catalogue = useMemo<CatalogItem[]>(() => [
     ...((boot?.ticketTypes ?? []).map((t) => ({
       id: t.id, kind: "ticket" as const, name: t.name, code: t.code, category: "Tickets" as const,
-      price: t.base_price_cents, detail: t.description || "Admission ticket",
+      price: boot?.priceRules.find((rule) => rule.ticket_type_id === t.id)?.unit_price_cents ?? t.base_price_cents, detail: t.description || "Admission ticket",
     }))),
     ...((boot?.products ?? []).map((p) => ({
       id: p.id, kind: "product" as const, name: p.name, code: p.sku, category: "Merchandise" as const,
-      price: p.unit_price_cents, detail: p.track_inventory ? `Stock: ${p.stock_on_hand}` : "Stock not tracked",
+      price: boot?.priceRules.find((rule) => rule.product_id === p.id)?.unit_price_cents ?? p.unit_price_cents, detail: p.track_inventory ? `Stock: ${p.stock_on_hand}` : "Stock not tracked",
       stock: p.stock_on_hand, trackInventory: p.track_inventory,
     }))),
   ], [boot]);
