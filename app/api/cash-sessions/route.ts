@@ -23,7 +23,7 @@ export async function POST(request: Request) {
         p_employee_id: employeeId, p_device_id: body.device_id, p_opening_float_cents: amount,
       });
       if (error) return NextResponse.json({ error: "Cash session could not be opened. Check the device registration and whether a session is already open." }, { status: 409 });
-      return NextResponse.json({ session: data }, { headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ session: { id: data.cash_session_id, device_id: body.device_id, opened_by: employeeId, status: data.status, opening_float_cents: data.opening_float_cents, opened_at: data.opened_at } }, { headers: { "Cache-Control": "no-store" } });
     }
     if (body.action === "close" && typeof body.cash_session_id === "string" && /^[0-9a-f-]{36}$/i.test(body.cash_session_id)) {
       const { data, error } = await client.rpc("close_cash_session", {
