@@ -135,9 +135,10 @@ export default function Home() {
       setBoot(data);
       setDeviceId((old) => old || data.devices[0]?.id || "");
       await saveCachedBootstrap(data).catch(() => undefined);
-      if (data.pinUnlocked) {
-        try { sessionStorage.setItem("museum-pos-pin-unlocked-at", String(Date.now())); } catch {}
-      }
+      try {
+        if (data.pinUnlocked) sessionStorage.setItem("museum-pos-pin-unlocked-at", String(Date.now()));
+        else sessionStorage.removeItem("museum-pos-pin-unlocked-at");
+      } catch {}
       setNotice({ kind: "success", text: "Connected to Supabase. Prices and stock below come from the current catalogue." });
     } catch (error) {
       try {
@@ -283,6 +284,7 @@ export default function Home() {
       const client = createSupabaseBrowserClient();
       await client.auth.signOut();
     } finally {
+      try { sessionStorage.removeItem("museum-pos-pin-unlocked-at"); } catch {}
       setBoot(null); setSession(null); setCart([]); setPin("");
       setNotice({ kind: "info", text: "Signed out." });
     }
