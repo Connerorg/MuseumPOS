@@ -30,6 +30,9 @@ begin
   if not found or v_sale.status not in ('completed','partially_refunded') then
     raise exception using errcode='22023', message='completed_sale_required';
   end if;
+  if v_sale.cashier_id <> p_actor_id and v_actor.role not in ('supervisor','manager','administrator') then
+    raise exception using errcode='42501', message='sale_owner_or_supervisor_required';
+  end if;
   select coalesce(sum(amount_cents),0) into v_reserved from public.refunds
     where sale_id=p_sale_id and status in ('pending','approved','completed');
   if v_reserved > 0 then
