@@ -10,7 +10,7 @@ type Device = { id: string; device_code: string; display_name: string };
 type CashSession = { id: string; device_id: string; opened_by: string; status: string; opening_float_cents: number; opened_at: string };
 type Category = { id: string; code: string; name: string };
 type CatalogItem = { id: string; kind: "ticket" | "product"; name: string; code: string; category: "Tickets" | "Merchandise"; price: number; detail: string; stock?: number; trackInventory?: boolean };
-type Bootstrap = { employee: Employee; ticketTypes: TicketType[]; products: Product[]; devices: Device[]; openSessions: CashSession[]; categories: Category[]; priceRules: { id: string; ticket_type_id: string | null; product_id: string | null; unit_price_cents: number; valid_from: string }[]; pinUnlocked: boolean };
+type Bootstrap = { employee: Employee; ticketTypes: TicketType[]; products: Product[]; devices: Device[]; openSessions: CashSession[]; categories: Category[]; employees?: Employee[]; priceRules: { id: string; ticket_type_id: string | null; product_id: string | null; unit_price_cents: number; valid_from: string }[]; pinUnlocked: boolean };
 type CartLine = { item: CatalogItem; quantity: number };
 type Notice = { kind: "success" | "error" | "info"; text: string };
 type Report = { period: { from: string; to: string }; totals: { sales_count: number; gross_sales_cents: number; refunds_count: number; refunds_cents: number; net_after_refunds_cents: number }; sales: { id: string; receipt_number: string | null; status: string; total_cents: number; created_at: string }[]; refunds: { id: string; sale_id: string; amount_cents: number; status: string; created_at: string }[]; truncated: boolean };
@@ -123,6 +123,8 @@ export default function Home() {
   const [refundDecisionReason, setRefundDecisionReason] = useState("");
   const [restockRefundedItems, setRestockRefundedItems] = useState(true);
   const [refundBusy, setRefundBusy] = useState(false);
+  const [employeePinTarget, setEmployeePinTarget] = useState("");
+  const [employeePin, setEmployeePin] = useState("");
   const [offlineEntries, setOfflineEntries] = useState<OfflineEntry[]>([]);
   const [isOnline, setIsOnline] = useState(true);
   const [syncBusy, setSyncBusy] = useState(false);
@@ -436,6 +438,19 @@ export default function Home() {
     } finally { setAuthBusy(false); }
   }
 
+  async function setEmployeeAccessPin(event: FormEvent) {
+    event.preventDefault();
+    setRefundBusy(true);
+    try {
+      await api("/api/employee/pin/set", { method: "POST", body: JSON.stringify({ employee_id: employeePinTarget, pin: employeePin }) });
+      setEmployeePin("");
+      setNotice({ kind: "success", text: "Employee PIN saved. Only the hash is stored by the database." });
+      await loadBootstrap();
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not set employee PIN." });
+    } finally { setRefundBusy(false); }
+  }
+
   async function requestRefund(event: FormEvent) {
     event.preventDefault();
     const sale = refundData?.sales.find((s) => s.id === refundSaleId);
@@ -533,11 +548,11 @@ export default function Home() {
   }
 
   const nav = [
-    { name: "Checkout", icon: "▦" }, { name: "Offline queue", icon: "↻" }, { name: "Tickets", icon: "▤" }, { name: "Refunds", icon: "↩" },
+    { name: "Checkout", icon: "▦" }, { name: "Offline queue", icon: "↻" }, { name: "Tickets", icon: "▤" }, { name: "Refunds", icon: "↩" }, { name: "Employees", icon: "E" },
     { name: "Inventory", icon: "▣" }, { name: "Cash-up", icon: "◷" }, { name: "Reports", icon: "▥" },
   ];
   const headings: Record<string, string> = {
-    Checkout: "Point of sale", "Offline queue": "Offline cash synchronization", Tickets: "Ticket admission", Refunds: "Refund requests", Inventory: "Inventory",
+    Employees: "Employee access", Checkout: "Point of sale", "Offline queue": "Offline cash synchronization", Tickets: "Ticket admission", Refunds: "Refund requests", Inventory: "Inventory",
     "Cash-up": "Cash-up & reconciliation", Reports: "Sales reports",
   };
 
@@ -562,7 +577,7 @@ export default function Home() {
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark">M</div><div><strong>Museum POS</strong><small>Ticketing &amp; sales</small></div></div>
-      <div><div className="nav-label">Workspace</div><nav className="nav" aria-label="Main navigation">{nav.map((item) => <button key={item.name} className={active === item.name ? "active" : ""} onClick={() => setActive(item.name)}><span className="nav-icon">{item.icon}</span>{item.name}</button>)}</nav></div>
+      <div><div className="nav-label">Workspace</div><nav className="nav" aria-label="Main navigation">{nav.filter((item) => item.name !== "Employees" || ["manager", "administrator"].includes(boot.employee.role)).map((item) => <button key={item.name} className={active === item.name ? "active" : ""} onClick={() => setActive(item.name)}><span className="nav-icon">{item.icon}</span>{item.name}</button>)}</nav></div>
       <div className="side-bottom"><span className="online-dot" /> Supabase connected<br />{boot.employee.display_name} · {boot.employee.role}<br /><br /><button className="secondary-btn" onClick={signOut}>Sign out</button></div>
     </aside>
     <main className="main">
