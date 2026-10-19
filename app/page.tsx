@@ -16,6 +16,41 @@ type Notice = { kind: "success" | "error" | "info"; text: string };
 type Report = { period: { from: string; to: string }; totals: { sales_count: number; gross_sales_cents: number; refunds_count: number; refunds_cents: number; net_after_refunds_cents: number }; sales: { id: string; receipt_number: string | null; status: string; total_cents: number; created_at: string }[]; refunds: { id: string; sale_id: string; amount_cents: number; status: string; created_at: string }[]; truncated: boolean };
 type RefundRecord = { id: string; sale_id: string; requested_by: string; approved_by: string | null; amount_cents: number; reason: string; status: string; created_at: string };
 type RefundData = { sales: { id: string; receipt_number: string | null; total_cents: number; status: string; created_at: string; cashier_id: string }[]; refunds: RefundRecord[]; canApprove: boolean };
+type OfflineEntry = { id: string; created_at: string; device_id: string; cash_session_id: string; client_transaction_id: string; idempotency_key: string; payment_method: "cash"; source: "offline"; items: { kind: "ticket" | "product"; id: string; quantity: number; expected_unit_price_cents: number }[]; display_items: { name: string; quantity: number; unit_price_cents: number }[]; status: "queued" | "synced" | "conflict"; receipt_number?: string; error?: string };
+const OFFLINE_DB_NAME = "museum-pos-offline";
+function openOfflineDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(OFFLINE_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains("sales")) req.result.createObjectStore("sales", { keyPath: "id" });
+      if (!req.result.objectStoreNames.contains("cache")) req.result.createObjectStore("cache", { keyPath: "key" });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function readOfflineEntries(): Promise<OfflineEntry[]> {
+  const db = await openOfflineDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const req = db.transaction("sales", "readonly").objectStore("sales").getAll();
+      req.onsuccess = () => resolve(req.result as OfflineEntry[]);
+      req.onerror = () => reject(req.error);
+    });
+  } finally { db.close(); }
+}
+async function saveOfflineEntry(entry: OfflineEntry): Promise<void> {
+  const db = await openOfflineDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction("sales", "readwrite");
+      tx.objectStore("sales").put(entry);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } finally { db.close(); }
+}
 const localDate = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
 
 const money = (cents: number) => new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }).format(cents / 100);
@@ -65,6 +100,10 @@ export default function Home() {
   const [refundDecisionReason, setRefundDecisionReason] = useState("");
   const [restockRefundedItems, setRestockRefundedItems] = useState(true);
   const [refundBusy, setRefundBusy] = useState(false);
+  const [offlineEntries, setOfflineEntries] = useState<OfflineEntry[]>([]);
+  const [isOnline, setIsOnline] = useState(true);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [checkoutIds, setCheckoutIds] = useState<{ client_transaction_id: string; idempotency_key: string } | null>(null);
 
   const loadBootstrap = useCallback(async () => {
     setLoading(true);
@@ -79,6 +118,18 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    const updateOnline = () => setIsOnline(navigator.onLine);
+    updateOnline();
+    window.addEventListener("online", updateOnline);
+    window.addEventListener("offline", updateOnline);
+    void readOfflineEntries().then(setOfflineEntries).catch(() => setNotice({ kind: "error", text: "Offline queue storage is unavailable in this browser." }));
+    return () => {
+      window.removeEventListener("online", updateOnline);
+      window.removeEventListener("offline", updateOnline);
+    };
   }, []);
 
   useEffect(() => {
@@ -347,11 +398,11 @@ export default function Home() {
   }
 
   const nav = [
-    { name: "Checkout", icon: "▦" }, { name: "Tickets", icon: "▤" }, { name: "Refunds", icon: "↩" },
+    { name: "Checkout", icon: "▦" }, { name: "Offline queue", icon: "↻" }, { name: "Tickets", icon: "▤" }, { name: "Refunds", icon: "↩" },
     { name: "Inventory", icon: "▣" }, { name: "Cash-up", icon: "◷" }, { name: "Reports", icon: "▥" },
   ];
   const headings: Record<string, string> = {
-    Checkout: "Point of sale", Tickets: "Ticket admission", Refunds: "Refund requests", Inventory: "Inventory",
+    Checkout: "Point of sale", "Offline queue": "Offline cash synchronization", Tickets: "Ticket admission", Refunds: "Refund requests", Inventory: "Inventory",
     "Cash-up": "Cash-up & reconciliation", Reports: "Sales reports",
   };
 
