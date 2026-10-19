@@ -107,7 +107,7 @@ export default function Home() {
   const [countedCash, setCountedCash] = useState("");
   const [barcode, setBarcode] = useState("");
   const [notice, setNotice] = useState<Notice>({ kind: "info", text: "Connecting to the configured POS backend…" });
-  const [lastSale, setLastSale] = useState<{ receipt_number: string; total_cents: number; sale_id: string } | null>(null);
+  const [lastSale, setLastSale] = useState<{ receipt_number: string; total_cents: number; sale_id: string; items?: { id: string; item_name_snapshot: string; quantity: number; unit_price_cents: number; line_total_cents: number; ticket_type_id: string | null }[]; tickets?: { id: string; sale_item_id: string; ticket_code: string; barcode: string; status: string; issued_at: string }[] } | null>(null);
   const [lastTicket, setLastTicket] = useState<{ ticket_code: string; status: string; redeemed_at: string } | null>(null);
   const [inventoryProductId, setInventoryProductId] = useState("");
   const [inventoryDelta, setInventoryDelta] = useState("1");
@@ -426,6 +426,10 @@ export default function Home() {
       setLastSale(result.sale);
       setCart([]);
       setCheckoutIds(null);
+      try {
+        const receipt = await api<{ items: NonNullable<typeof lastSale>["items"]; tickets: NonNullable<typeof lastSale>["tickets"] }>(`/api/sales/${result.sale.sale_id}`);
+        setLastSale({ ...result.sale, items: receipt.items, tickets: receipt.tickets });
+      } catch {}
       await loadBootstrap();
       setNotice({ kind: "success", text: `Sale completed: ${result.sale.receipt_number}. Cash payment was recorded in the database.` });
     } catch (error) {
@@ -674,7 +678,7 @@ export default function Home() {
           <div className="cart-summary"><div className="sum-row"><span>Subtotal</span><span>{money(total)}</span></div><div className="sum-row"><span>Tax</span><span>Unconfigured</span></div><div className="sum-row total"><span>Total before configured tax</span><span>{money(total)}</span></div>
             {!session ? <div className="notice notice-info">Open a cash session before completing sales.</div> : <div className="notice notice-info">Cash only. Card terminal processing is not configured.</div>}
             <button className="primary-btn" disabled={!pinUnlocked || !session || !cart.length || total <= 0 || authBusy} onClick={checkout}>{authBusy ? "Processing…" : (isOnline ? "Complete cash sale" : "Queue offline cash sale")}</button>
-            {lastSale && <div className="sale-receipt"><strong>Sale completed</strong><div>Receipt: {lastSale.receipt_number}</div><div>Total: {money(lastSale.total_cents)}</div><small>Sale ID: {lastSale.sale_id}</small></div>}
+            {lastSale && <div className="sale-receipt print-receipt"><strong>Sale completed</strong><div>Receipt: {lastSale.receipt_number}</div><div>Total: {money(lastSale.total_cents)}</div>{lastSale.items?.map((item) => <div key={item.id} className="receipt-line">{item.item_name_snapshot} × {item.quantity}<span>{money(item.line_total_cents)}</span></div>)}{lastSale.tickets?.length ? <div className="issued-ticket-list"><strong>Issued admission tickets</strong>{lastSale.tickets.map((ticket) => <div className="issued-ticket" key={ticket.id}><span>Ticket code: <b>{ticket.ticket_code}</b></span><span className="barcode-text">{ticket.barcode}</span><small>Status: {ticket.status}</small></div>)}</div> : null}<small>Sale ID: {lastSale.sale_id}</small><button className="secondary-btn no-print" onClick={() => window.print()}>Print receipt / tickets</button></div>}
             <div className="helper">Tax treatment remains unconfigured pending management/accounting confirmation. Do not use for real sales until this is confirmed.</div>
           </div>
         </section>
